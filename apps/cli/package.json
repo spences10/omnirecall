@@ -1,6 +1,6 @@
 {
 	"name": "omnirecall",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"description": "Recall coding-agent conversations — early CLI scaffold",
 	"keywords": [
 		"cli",
