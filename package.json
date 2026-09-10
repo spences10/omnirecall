@@ -1,0 +1,29 @@
+{
+	"name": "omnirecall-workspace",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "pnpm --filter omnirecall build",
+		"dev": "pnpm --filter omnirecall dev",
+		"start": "pnpm --filter omnirecall start",
+		"check": "vp check",
+		"check:fix": "vp check --fix",
+		"format": "vp fmt",
+		"test": "pnpm build && vp test",
+		"test:watch": "pnpm build && vp test watch",
+		"changeset": "changeset",
+		"version": "changeset version",
+		"release": "pnpm check && pnpm test && changeset publish"
+	},
+	"devDependencies": {
+		"@changesets/cli": "^3.0.2",
+		"@types/node": "^24.0.0",
+		"typescript": "^6.0.3",
+		"vite-plus": "0.2.0",
+		"vitest": "4.1.9"
+	},
+	"engines": {
+		"node": ">=24.11.0"
+	},
+	"packageManager": "pnpm@11.22.0"
+}

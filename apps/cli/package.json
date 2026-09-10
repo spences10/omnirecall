@@ -1,0 +1,43 @@
+{
+	"name": "omnirecall",
+	"version": "0.0.1",
+	"description": "Recall coding-agent conversations — early CLI scaffold",
+	"keywords": [
+		"cli",
+		"coding-agent",
+		"recall",
+		"sessions"
+	],
+	"homepage": "https://github.com/spences10/omnirecall#readme",
+	"bugs": {
+		"url": "https://github.com/spences10/omnirecall/issues"
+	},
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/spences10/omnirecall.git",
+		"directory": "apps/cli"
+	},
+	"bin": {
+		"omnirecall": "./dist/index.js"
+	},
+	"files": [
+		"dist"
+	],
+	"type": "module",
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "vp pack",
+		"dev": "vp pack --watch",
+		"start": "node ./dist/index.js",
+		"prepack": "pnpm run build"
+	},
+	"dependencies": {
+		"citty": "^0.2.2"
+	},
+	"engines": {
+		"node": ">=24.11.0"
+	}
+}
