@@ -585,7 +585,7 @@ test('plain sync discovers available histories, reuses custom sources and respec
 	}
 });
 
-test('sync shows progress on stderr and keeps JSON mode quiet', () => {
+test('captured sync shows a concise summary and JSON mode stays structured', () => {
 	const root = mkdtempSync(join(tmpdir(), 'omni-progress-'));
 	try {
 		const sessions = join(root, 'sessions');
@@ -603,15 +603,68 @@ test('sync shows progress on stderr and keeps JSON mode quiet', () => {
 		];
 		const human = run_cli(args);
 		expect(human.status).toBe(0);
-		expect(human.stderr).toContain('Starting sync');
-		expect(human.stderr).toContain('Checking pi [1/1]: 1/1 items');
-		expect(human.stderr).toContain('Importing pi [1/1]: 1/1 items');
-		expect(JSON.parse(human.stdout).files_indexed).toBe(1);
+		expect(human.stderr).not.toContain('Starting sync');
+		expect(human.stdout).toContain('Sync complete.');
+		expect(human.stdout).toMatch(/Files processed\s+1/);
+		expect(human.stdout).not.toContain('schema_version');
 		const machine = run_cli([...args, '--json']);
 		expect(machine.status).toBe(0);
 		expect(machine.stderr).not.toContain('Starting sync');
 		expect(machine.stderr).not.toContain('Checking pi');
 		expect(JSON.parse(machine.stdout).files_indexed).toBe(1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('human sync groups every issue while verbose and JSON retain bounded details', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omni-summary-'));
+	try {
+		const sessions = join(root, 'sessions');
+		mkdirSync(sessions);
+		for (let i = 0; i < 105; i++)
+			writeFileSync(join(sessions, `bad-${i}.jsonl`), 'invalid\n');
+		const args = [
+			'sync',
+			'--pi-root',
+			sessions,
+			'--db',
+			join(root, 'archive.db'),
+		];
+		const human = run_cli(args);
+		expect(human.status).toBe(2);
+		expect(human.stdout).toContain('Sync completed with issues.');
+		expect(human.stdout).toContain('pi: 105 invalid data');
+		expect(human.stdout).not.toContain(sessions);
+		expect(human.stdout).not.toContain('Invalid complete');
+		expect(human.stdout).toContain('--verbose');
+		const verbose = run_cli([...args, '--verbose']);
+		expect(verbose.status).toBe(2);
+		expect(verbose.stdout).toContain(sessions);
+		expect(verbose.stdout).toContain('Showing 100 of 105 issues.');
+		const machine = run_cli([...args, '--json']);
+		expect(machine.status).toBe(2);
+		const result = JSON.parse(machine.stdout);
+		expect(result.issue_counts).toEqual([
+			{ agent: 'pi', code: 'invalid', count: 105 },
+		]);
+		expect(result.issues).toHaveLength(100);
+		expect(result.issues_truncated).toBe(true);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('empty and failed human syncs give plain explanations', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omni-empty-summary-'));
+	try {
+		const empty = run_cli(['sync', '--db', join(root, 'archive.db')]);
+		expect(empty.status).toBe(0);
+		expect(empty.stdout).toContain('Nothing to sync.');
+		const failed = run_cli(['sync', '--agent', 'unknown']);
+		expect(failed.status).toBe(1);
+		expect(failed.stderr).toContain('Sync failed:');
+		expect(failed.stdout).toBe('');
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

@@ -57,8 +57,24 @@ export async function sync(
 			message: string;
 		}[],
 		issues_truncated: false,
+		issue_counts: [] as {
+			agent: string;
+			code: string;
+			count: number;
+		}[],
 	};
 	const issue = (source: Source, path: string, error: unknown) => {
+		const code = error_code(error);
+		const group = result.issue_counts.find(
+			(group) => group.agent === source.agent && group.code === code,
+		);
+		if (group) group.count++;
+		else
+			result.issue_counts.push({
+				agent: source.agent,
+				code,
+				count: 1,
+			});
 		result.failures++;
 		if (error_code(error) === 'error') result.operational_failures++;
 		if (result.issues.length < 100)

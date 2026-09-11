@@ -27,13 +27,20 @@ the original record; follow `next_char_offset` for longer content.
 including records without searchable text. Raw excerpts may be
 fragments of JSON.
 
-Sync reports discovery, checking and import progress with elapsed time
-on stderr. Use `--json` for quiet, machine-readable output. Counts are
-per source and phase; checking and importing are separate phases.
-Unchanged inputs reuse a persistent cache and are counted in
-`files_skipped` (also included in `files_indexed`). The first sync
-after upgrading an existing archive populates this cache. No database
-reset is needed.
+Plain sync prints a short summary of processed/unchanged files,
+revisions, and grouped issue counts. Use `--verbose` to include
+individual issue paths and errors, or `--json` for quiet, structured
+results. Detailed issues are capped at 100; grouped counts include
+every issue. Partial syncs retain exit code 2, and operational
+failures retain exit code 1.
+
+Interactive terminals also show discovery, checking and import
+progress with elapsed time on stderr. Captured output contains only
+the summary. Counts are per source and phase; checking and importing
+are separate phases. Unchanged inputs reuse a persistent cache and are
+counted in `files_skipped` (also included in `files_indexed`). The
+first sync after upgrading an existing archive populates this cache.
+No database reset is needed.
 
 Cache checks include file identity, size, nanosecond
 modification/change times, permissions, parser version and source

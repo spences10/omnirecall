@@ -25,6 +25,7 @@ import {
 } from '../../../packages/core/src/types.ts';
 import { database_path } from './paths.ts';
 import { sync_progress } from './progress.ts';
+import { sync_summary } from './sync-output.ts';
 import { automatic_sources } from './sources.ts';
 
 const package_metadata = JSON.parse(
@@ -104,6 +105,10 @@ function command(name: string) {
 		},
 		args: {
 			json: { type: 'boolean', description: 'Machine-readable JSON' },
+			verbose: {
+				type: 'boolean',
+				description: 'Sync: show individual issue paths and errors',
+			},
 			full: {
 				type: 'boolean',
 				description: 'Search: return detailed schema v1 output',
@@ -367,11 +372,20 @@ function command(name: string) {
 						'arguments',
 						'Provide a query of 1–1000 characters',
 					);
-				if (name === 'sync') progress = sync_progress(!args.json);
+				if (args.verbose && name !== 'sync')
+					throw new InputError(
+						'arguments',
+						'--verbose applies to sync only',
+					);
+				if (name === 'sync')
+					progress = sync_progress(
+						!args.json && Boolean(process.stderr.isTTY),
+					);
 				const db_path = database_path(args.db);
 				if (name === 'sync' || existsSync(db_path))
 					archive = new Archive(db_path, name !== 'sync');
 				let result: Record<string, unknown>;
+				let human_sync: string | undefined;
 				if (name === 'sync') {
 					if (!sources.length)
 						selected = (await automatic_sources(archive!)).filter(
@@ -379,19 +393,32 @@ function command(name: string) {
 								(!agent || s.agent === agent) &&
 								(!options.source || s.source_id === options.source),
 						);
-					result = await sync(
+					const synced = await sync(
 						archive!,
 						selected,
 						[pi_adapter, codex_adapter, claude_adapter],
 						progress?.update,
 					);
 					progress?.finish();
+					result = synced;
 					if (!selected.length) {
 						result.status = 'empty';
 						result.message =
 							'No available or configured sources match. Use root flags to add a custom location.';
 					}
 					result.sources_selected = selected.length;
+					if (!args.json)
+						human_sync = sync_summary(
+							{
+								...synced,
+								sources_selected: selected.length,
+								message:
+									typeof result.message === 'string'
+										? result.message
+										: undefined,
+							},
+							Boolean(args.verbose),
+						);
 					if (result.status === 'partial') process.exitCode = 2;
 					else if (result.status === 'error') process.exitCode = 1;
 				} else if (name === 'read') {
@@ -491,6 +518,10 @@ function command(name: string) {
 						truncated: has_more,
 					};
 				}
+				if (human_sync !== undefined) {
+					console.log(human_sync);
+					return;
+				}
 				const output = bounded_json(
 					{ schema_version, ...result },
 					max_bytes,
@@ -503,6 +534,12 @@ function command(name: string) {
 			} catch (error) {
 				progress?.finish();
 				process.exitCode = 1;
+				if (name === 'sync' && !args.json) {
+					console.error(
+						`Sync failed: ${error instanceof Error ? error.message : 'Operation failed'}`,
+					);
+					return;
+				}
 				console.log(
 					bounded_json(
 						{
