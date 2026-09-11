@@ -1,3 +1,4 @@
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { preserve_records } from '../../adapter-shared/src/evidence.ts';
 import {
@@ -276,10 +277,25 @@ export async function session_titles(
 }
 
 export const codex_adapter = Object.assign(
-	jsonl_adapter('codex', parse_codex, async (root) =>
-		(await discover_jsonl(root)).filter(
-			(path) => path !== join(root, 'session_index.jsonl'),
-		),
-	),
+	jsonl_adapter('codex', parse_codex, async (root) => {
+		const entries = await readdir(root, { withFileTypes: true });
+		const history_dirs = entries.filter(
+			(e) =>
+				e.isDirectory() &&
+				['sessions', 'archived_sessions'].includes(e.name),
+		);
+		const paths = history_dirs.length
+			? (
+					await Promise.all(
+						history_dirs.map((e) =>
+							discover_jsonl(join(root, e.name)),
+						),
+					)
+				).flat()
+			: await discover_jsonl(root);
+		return paths
+			.filter((path) => path !== join(root, 'session_index.jsonl'))
+			.sort();
+	}),
 	{ titles: session_titles },
 );

@@ -384,3 +384,13 @@ implementation:
 No source migration or cleanup command has been introduced. Schema 1
 archives remain untouched and require a separate new schema 2 database
 for this implementation.
+
+### Automatic source selection
+
+Plain CLI `sync` now combines stored sources with available standard
+Pi, Claude, and Codex locations. Explicit roots replace this automatic
+selection for the invocation. Agent/source filters apply to either
+mode. Known missing sources remain visible as sync issues. With
+nothing to import, an empty database is created and the CLI explains
+the empty result. Tests isolate the child process home directory so
+automatic discovery cannot import developer histories.

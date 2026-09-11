@@ -10,7 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, test } from 'vitest';
+import { afterAll, describe, expect, test } from 'vitest';
 import {
 	codex_records,
 	jsonl,
@@ -25,11 +25,23 @@ const package_metadata = JSON.parse(
 	readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ) as { name: string; version: string };
 
+const isolated_home = mkdtempSync(join(tmpdir(), 'omni-cli-home-'));
+afterAll(() =>
+	rmSync(isolated_home, { recursive: true, force: true }),
+);
+
 function run_cli(args: string[], env: NodeJS.ProcessEnv = {}) {
 	return spawnSync(process.execPath, [entry_path, ...args], {
 		encoding: 'utf8',
 		timeout: 10_000,
-		env: { ...process.env, NO_COLOR: '1', ...env },
+		env: {
+			...process.env,
+			HOME: isolated_home,
+			USERPROFILE: isolated_home,
+			CODEX_HOME: join(isolated_home, '.codex'),
+			NO_COLOR: '1',
+			...env,
+		},
 	});
 }
 
@@ -50,9 +62,9 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 		expect(JSON.parse(unindexed.stdout).status).toBe('unindexed');
 		expect(existsSync(db)).toBe(false);
 		const no_roots = run_cli(['sync', '--db', db, '--json']);
-		expect(no_roots.status).toBe(1);
-		expect(JSON.parse(no_roots.stdout).code).toBe('arguments');
-		expect(existsSync(db)).toBe(false);
+		expect(no_roots.status).toBe(0);
+		expect(JSON.parse(no_roots.stdout).status).toBe('empty');
+		expect(existsSync(db)).toBe(true);
 		mkdirSync(pi_root);
 		mkdirSync(codex_root);
 		writeFileSync(join(pi_root, 'test.jsonl'), jsonl(pi_records()));
@@ -509,5 +521,66 @@ test('Claude tool search and raw-record continuation work through the built CLI'
 		expect(JSON.parse(next.stdout).results[0].char_offset).toBe(25);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('plain sync discovers available histories, reuses custom sources and respects overrides', () => {
+	const home = mkdtempSync(join(tmpdir(), 'omni-auto-'));
+	try {
+		const env = {
+			HOME: home,
+			USERPROFILE: home,
+			CODEX_HOME: join(home, '.codex'),
+		};
+		const db = join(home, 'archive.db');
+		const pi = join(home, '.pi', 'agent', 'sessions'),
+			codex = join(home, '.codex', 'sessions');
+		mkdirSync(pi, { recursive: true });
+		mkdirSync(codex, { recursive: true });
+		writeFileSync(join(pi, 'pi.jsonl'), jsonl(pi_records('auto-pi')));
+		writeFileSync(
+			join(codex, 'codex.jsonl'),
+			jsonl(codex_records('auto-codex')),
+		);
+		writeFileSync(
+			join(home, '.codex', 'history.jsonl'),
+			'not a supported session\n',
+		);
+		let run = run_cli(['sync', '--db', db, '--json'], env);
+		expect(run.status, run.stdout + run.stderr).toBe(0);
+		expect(JSON.parse(run.stdout)).toMatchObject({
+			sources_selected: 2,
+			revisions_added: 2,
+		});
+		const custom = join(home, 'custom');
+		mkdirSync(custom);
+		writeFileSync(
+			join(custom, 'pi.jsonl'),
+			jsonl(pi_records('custom-pi')),
+		);
+		run = run_cli(
+			['sync', '--pi-root', custom, '--db', db, '--json'],
+			env,
+		);
+		expect(JSON.parse(run.stdout)).toMatchObject({
+			sources_selected: 1,
+			revisions_added: 1,
+		});
+		run = run_cli(['sync', '--db', db, '--json'], env);
+		expect(JSON.parse(run.stdout)).toMatchObject({
+			sources_selected: 3,
+			revisions_added: 0,
+		});
+		run = run_cli(
+			['sync', '--agent', 'codex', '--db', db, '--json'],
+			env,
+		);
+		expect(JSON.parse(run.stdout).sources_selected).toBe(1);
+		rmSync(custom, { recursive: true });
+		run = run_cli(['sync', '--db', db, '--json'], env);
+		expect(run.status).toBe(2);
+		expect(JSON.parse(run.stdout).issues[0].code).toBe('missing');
+	} finally {
+		rmSync(home, { recursive: true, force: true });
 	}
 });

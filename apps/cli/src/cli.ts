@@ -24,6 +24,7 @@ import {
 	type Source,
 } from '../../../packages/core/src/types.ts';
 import { database_path } from './paths.ts';
+import { automatic_sources } from './sources.ts';
 
 const package_metadata = JSON.parse(
 	readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -98,7 +99,7 @@ function command(name: string) {
 	return defineCommand({
 		meta: {
 			name,
-			description: `${name} archived coding-agent sessions (explicit roots for sync)`,
+			description: `${name} archived coding-agent sessions (automatic discovery or explicit roots)`,
 		},
 		args: {
 			json: { type: 'boolean', description: 'Machine-readable JSON' },
@@ -338,16 +339,12 @@ function command(name: string) {
 						'arguments',
 						'sources supports agent/source filters only',
 					);
-				const selected = sources.filter(
+				let selected = sources.filter(
 					(source) =>
 						(!agent || source.agent === agent) &&
 						(!options.source || source.source_id === options.source),
 				);
-				if (name === 'sync' && !selected.length)
-					throw new InputError(
-						'arguments',
-						'sync requires an explicit --pi-root, --codex-root, or --claude-root matching the source filters',
-					);
+
 				if (
 					name === 'sync' &&
 					(options.project ||
@@ -356,7 +353,7 @@ function command(name: string) {
 				)
 					throw new InputError(
 						'arguments',
-						'sync operates on whole explicit roots, not project/session/history filters',
+						'sync operates on whole source roots, not project/session/history filters',
 					);
 				const query = optional(args.query)?.trim();
 				if (name === 'read') parse_ref(query ?? '');
@@ -373,11 +370,23 @@ function command(name: string) {
 					archive = new Archive(db_path, name !== 'sync');
 				let result: Record<string, unknown>;
 				if (name === 'sync') {
+					if (!sources.length)
+						selected = (await automatic_sources(archive!)).filter(
+							(s) =>
+								(!agent || s.agent === agent) &&
+								(!options.source || s.source_id === options.source),
+						);
 					result = await sync(archive!, selected, [
 						pi_adapter,
 						codex_adapter,
 						claude_adapter,
 					]);
+					if (!selected.length) {
+						result.status = 'empty';
+						result.message =
+							'No available or configured sources match. Use root flags to add a custom location.';
+					}
+					result.sources_selected = selected.length;
 					if (result.status === 'partial') process.exitCode = 2;
 					else if (result.status === 'error') process.exitCode = 1;
 				} else if (name === 'read') {

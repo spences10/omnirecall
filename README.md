@@ -18,6 +18,7 @@ Requires Node.js 24.11+ and pnpm 12.3.4.
 pnpm install --frozen-lockfile
 pnpm build
 pnpm start info --json
+pnpm start sync --json
 pnpm start sync --pi-root /path/to/pi/sessions \
   --codex-root /path/to/codex/history-tree \
   --claude-root /path/to/claude/projects --json
@@ -32,10 +33,22 @@ and core are private workspace packages bundled into it.
 
 ## Archive and import
 
-Configure roots explicitly on each `sync`. `sources` reports indexed
-roots or probes roots supplied through flags. Source files are read
-without changing them. Retrieval reads only the archive and never
-syncs automatically or follows a path into a sibling recall database.
+Plain `sync` reuses configured roots and discovers available standard
+locations: `~/.pi/agent/sessions`, `~/.claude/projects`, and Codex
+histories under `$CODEX_HOME` (default `~/.codex`). Codex home
+discovery scans `sessions/` and `archived_sessions/`, excluding
+unrelated home JSONL files. Overlapping defaults are skipped when that
+agent already has a configured root covering or inside them.
+Previously configured missing roots still report their availability
+rather than silently disappearing.
+
+Root flags select only those explicit locations for that invocation;
+`--agent` and `--source` filter the selection. With no matching
+sources, `sync` creates an empty archive and reports `status: empty`
+with an explanation. `sources` reports indexed roots or probes
+supplied roots. Source files are read without changing them. Retrieval
+reads only the archive and never syncs automatically or follows a path
+into a sibling recall database.
 
 Each accepted source record retains its original JSON envelope.
 Searchable parts include dialogue, thinking, tool calls/results,

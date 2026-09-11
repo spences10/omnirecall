@@ -5,6 +5,8 @@ evidence. This working-tree preview preserves original JSON alongside
 searchable dialogue, reasoning, tool calls/results, and summaries.
 
 ```bash
+pnpx omnirecall sync --json
+# Optional explicit locations:
 pnpx omnirecall sync --pi-root /path/to/pi/sessions \
   --codex-root /path/to/codex/history-tree \
   --claude-root /path/to/claude/projects --json
@@ -25,10 +27,12 @@ the original record; follow `next_char_offset` for longer content.
 including records without searchable text. Raw excerpts may be
 fragments of JSON.
 
-Sync requires explicit roots. Queries use only the archive. Missing
-source histories do not erase archived evidence. Full revisions retain
-changed content; `--include-history` exposes earlier revisions and
-inactive/superseded work. External attachment files are not copied.
+Plain sync discovers standard Pi/Claude/Codex locations and reuses
+stored roots. Explicit root flags override that selection. Queries use
+only the archive. Missing source histories do not erase archived
+evidence. Full revisions retain changed content; `--include-history`
+exposes earlier revisions and inactive/superseded work. External
+attachment files are not copied.
 
 The Claude adapter covers an initial set of transcript shapes, keeps
 subagent files separate, and reports branch state as unknown. It does
