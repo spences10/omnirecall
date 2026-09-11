@@ -28,6 +28,7 @@ export function sync_progress(enabled: boolean) {
 				completed,
 				total,
 				files_indexed,
+				files_skipped = 0,
 				failures,
 			} = progress;
 			const label = {
@@ -41,7 +42,7 @@ export function sync_progress(enabled: boolean) {
 				// eslint-disable-next-line no-control-regex
 				.replace(/[\x00-\x1f\x7f-\x9f]/g, '')
 				.slice(0, 40);
-			current = `${label} ${safe_agent} [${source_index}/${source_count}]${phase === 'discovering' ? '' : `: ${completed}/${total} items`} — ${files_indexed} files indexed, ${failures} failures`;
+			current = `${label} ${safe_agent} [${source_index}/${source_count}]${phase === 'discovering' ? '' : `: ${completed}/${total} items`} — ${files_indexed} files indexed (${files_skipped} unchanged), ${failures} failures`;
 			const phase_key = `${source_index}:${phase}`;
 			if (
 				phase_key !== last_phase ||

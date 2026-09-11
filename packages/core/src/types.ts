@@ -63,6 +63,8 @@ export interface Adapter {
 	agent: Agent;
 	discover(root: string): Promise<ImportUnit[]>;
 	read(unit: ImportUnit): Promise<ImportResult>;
+	// Opt in only when this token covers all inputs affecting read(), including interpretation.
+	fingerprint?(unit: ImportUnit): Promise<string | undefined>;
 	titles?(root: string): Promise<Map<string, string>>;
 }
 export interface JsonlAdapter extends Adapter {

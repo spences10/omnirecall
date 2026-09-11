@@ -1,3 +1,4 @@
+import { parse_cache, type SyncCache } from './sync-cache.ts';
 import {
 	chmodSync,
 	existsSync,
@@ -147,6 +148,12 @@ export class Archive {
 					'database',
 					'Unsupported archive schema',
 				);
+			// Additive, disposable acceleration data; existing schema-2 archives stay readable.
+			if (!read_only)
+				this.#db.exec(`CREATE TABLE IF NOT EXISTS sync_cache (
+    source_id TEXT NOT NULL, unit_key TEXT NOT NULL, signature TEXT NOT NULL,
+    data TEXT NOT NULL, PRIMARY KEY(source_id, unit_key)
+   )`);
 			if (!read_only && path !== ':memory:') chmodSync(path, 0o600);
 		} catch (error) {
 			this.close();
@@ -226,6 +233,45 @@ export class Archive {
 				if (!seen.has(path))
 					this.path_status(source, path, 'missing');
 		});
+	}
+
+	cached(
+		source: Source,
+		key: string,
+		signature: string,
+	): SyncCache | undefined {
+		const row = this.#statement(
+			'SELECT data FROM sync_cache WHERE source_id=? AND unit_key=? AND signature=?',
+		).get(source.source_id, key, signature);
+		if (!row) return;
+		const cache = parse_cache(String(row.data));
+		if (!cache || !cache.sessions.length || !cache.inputs.length)
+			return;
+		for (const session of cache.sessions) {
+			const current = this.#statement(
+				'SELECT current_revision FROM sessions WHERE session_id=? AND source_id=?',
+			).get(session.session_id, source.source_id);
+			if (current?.current_revision !== session.revision_id) return;
+		}
+		return cache;
+	}
+	cache(
+		source: Source,
+		key: string,
+		signature: string,
+		data: SyncCache,
+	) {
+		this.#statement(
+			'INSERT INTO sync_cache VALUES(?,?,?,?) ON CONFLICT(source_id,unit_key) DO UPDATE SET signature=excluded.signature,data=excluded.data',
+		).run(source.source_id, key, signature, JSON.stringify(data));
+	}
+	refresh_cached(source: Source, cache: SyncCache) {
+		for (const input of cache.inputs)
+			this.path_status(
+				source,
+				input.path,
+				input.partial ? 'partial' : 'available',
+			);
 	}
 
 	store(

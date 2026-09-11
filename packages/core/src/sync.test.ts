@@ -5,6 +5,8 @@ import {
 	readFileSync,
 	renameSync,
 	rmSync,
+	statSync,
+	utimesSync,
 	writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +16,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 import { codex_adapter } from '../../adapter-codex/src/index.ts';
 import { pi_adapter } from '../../adapter-pi/src/index.ts';
 import { Archive, type QueryOptions } from './database.ts';
-import { source_config } from './files.ts';
+import { jsonl_adapter, source_config } from './files.ts';
 import {
 	codex_entry,
 	codex_item,
@@ -635,4 +637,149 @@ test('progress covers both passes and counts rejected inputs without indexing th
 		files_indexed: result.files_indexed,
 		failures: result.failures,
 	});
+});
+
+test('parses once initially, persists the cache across reopen, and skips unchanged inputs', async () => {
+	let parses = 0;
+	const counted = jsonl_adapter('pi', (records) => {
+		parses++;
+		return pi_adapter.parse(records);
+	});
+	const first = await sync(archive, [sources[0]!], [counted]);
+	expect(first).toMatchObject({
+		revisions_added: 1,
+		files_skipped: 0,
+	});
+	expect(parses).toBe(1);
+	archive.close();
+	archive = new Archive(join(root, 'omnirecall.db'));
+	const second = await sync(archive, [sources[0]!], [counted]);
+	expect(second).toMatchObject({
+		revisions_added: 0,
+		files_indexed: 1,
+		files_skipped: 1,
+	});
+	expect(parses).toBe(1);
+	expect(archive.search('migrations', options)).toHaveLength(1);
+});
+
+test('same-size rewrite with restored mtime invalidates the cache through ctime', async () => {
+	await sync(archive, sources, adapters);
+	const path = path_for('pi');
+	const before = statSync(path);
+	writeFileSync(
+		path,
+		readFileSync(path, 'utf8').replace('safely', 'surely'),
+	);
+	utimesSync(path, before.atime, before.mtime);
+	const result = await sync(archive, sources, adapters);
+	expect(result).toMatchObject({
+		revisions_added: 1,
+		files_skipped: 1,
+	});
+	expect(archive.search('surely', options)).toHaveLength(1);
+	expect(
+		archive.search('safely', { ...options, agent: 'pi' }),
+	).toEqual([]);
+});
+
+test('new divergent copies conflict with cached identities on every subsequent sync', async () => {
+	await sync(archive, sources, adapters);
+	writeFileSync(
+		join(root, 'pi', 'copy.jsonl'),
+		jsonl(pi_records()).replace('safely', 'surely'),
+	);
+	for (let n = 0; n < 2; n++) {
+		const result = await sync(archive, [sources[0]!], adapters);
+		expect(result.issues.map((issue) => issue.code)).toEqual([
+			'conflict',
+			'conflict',
+		]);
+		expect(result.revisions_added).toBe(0);
+		expect(result.files_skipped).toBe(0);
+	}
+	expect(archive.search('surely', options)).toEqual([]);
+	rmSync(join(root, 'pi', 'copy.jsonl'));
+	expect(
+		(await sync(archive, [sources[0]!], adapters)).files_skipped,
+	).toBe(1);
+});
+
+test('parser version changes and corrupt acceleration data force a fresh parse', async () => {
+	let parses = 0;
+	const counted = jsonl_adapter('pi', (records) => {
+		parses++;
+		return pi_adapter.parse(records);
+	});
+	await sync(archive, [sources[0]!], [counted]);
+	counted.parser_version++;
+	expect(
+		(await sync(archive, [sources[0]!], [counted])).revisions_added,
+	).toBe(1);
+	expect(parses).toBe(2);
+	inspection.exec("UPDATE sync_cache SET data='broken'");
+	expect(
+		(await sync(archive, [sources[0]!], [counted])).files_skipped,
+	).toBe(0);
+	expect(parses).toBe(3);
+});
+
+test.each([false, true])(
+	'a source changed after checking is rejected (cached=%s)',
+	async (cached) => {
+		if (cached) await sync(archive, [sources[0]!], adapters);
+		const result = await sync(
+			archive,
+			[sources[0]!],
+			adapters,
+			(event) => {
+				if (event.phase === 'importing' && event.completed === 0)
+					appendFileSync(
+						path_for('pi'),
+						jsonl([
+							pi_entry('race', 'u2', 'assistant', 'uncommitted-race'),
+						]),
+					);
+			},
+		);
+		expect(result.issues[0]?.code).toBe('changed');
+		expect(result.revisions_added).toBe(0);
+		expect(result.files_skipped).toBe(0);
+		expect(archive.search('uncommitted', options)).toEqual([]);
+	},
+);
+
+test('unfinished tails remain partial when cached and are imported when completed', async () => {
+	const line = jsonl([
+		pi_entry('later', 'u2', 'assistant', 'completed-tail'),
+	]);
+	appendFileSync(path_for('pi'), line.slice(0, -1));
+	await sync(archive, [sources[0]!], adapters);
+	expect(await sync(archive, [sources[0]!], adapters)).toMatchObject({
+		status: 'partial',
+		partial_files: 1,
+		files_skipped: 1,
+	});
+	appendFileSync(path_for('pi'), '\n');
+	expect(await sync(archive, [sources[0]!], adapters)).toMatchObject({
+		status: 'ok',
+		revisions_added: 1,
+		files_skipped: 0,
+	});
+	expect(archive.search('completed', options)).toHaveLength(1);
+});
+
+test('existing archives without the acceleration table upgrade on writable open', async () => {
+	await sync(archive, sources, adapters);
+	archive.close();
+	inspection.exec('DROP TABLE sync_cache');
+	archive = new Archive(join(root, 'omnirecall.db'));
+	const result = await sync(archive, sources, adapters);
+	expect(result).toMatchObject({
+		revisions_added: 0,
+		files_skipped: 0,
+	});
+	expect((await sync(archive, sources, adapters)).files_skipped).toBe(
+		2,
+	);
 });

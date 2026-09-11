@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open, readdir, stat } from 'node:fs/promises';
+import { lstat, open, readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
 	InputError,
@@ -129,17 +129,8 @@ export function jsonl_adapter(
 	parse: import('./types.ts').JsonlAdapter['parse'],
 	discover = discover_jsonl,
 ): import('./types.ts').JsonlAdapter {
-	return {
-		agent,
-		parse,
-		parser_version,
-		async discover(root) {
-			return (await discover(root)).map((path) => ({
-				key: path,
-				locators: [path],
-			}));
-		},
-		async read(unit) {
+	const read: import('./types.ts').JsonlAdapter['read'] =
+		async function (this: import('./types.ts').JsonlAdapter, unit) {
 			if (unit.locators.length !== 1)
 				throw new InputError(
 					'invalid',
@@ -149,8 +140,46 @@ export function jsonl_adapter(
 			const snapshot = await read_snapshot(path);
 			return {
 				sessions: [this.parse(snapshot.records, path)],
-				inputs: [{ path, ...snapshot }],
+				inputs: [
+					{
+						path,
+						hash: snapshot.hash,
+						byte_offset: snapshot.byte_offset,
+						partial: snapshot.partial,
+					},
+				],
 			};
+		};
+	return {
+		agent,
+		parse,
+		parser_version,
+		read,
+		async fingerprint(unit) {
+			// A wrapper that changes parsing/reading must explicitly provide its own cache contract.
+			if (this.read !== read || this.parse !== parse)
+				return undefined;
+			if (unit.locators.length !== 1) return undefined;
+			const info = await lstat(unit.locators[0]!, { bigint: true });
+			if (!info.isFile() || info.size > BigInt(max_file_bytes))
+				throw new InputError(
+					'unsupported',
+					'Expected a regular file of at most 64 MiB',
+				);
+			return [
+				info.dev,
+				info.ino,
+				info.size,
+				info.mtimeNs,
+				info.ctimeNs,
+				info.mode,
+			].join(':');
+		},
+		async discover(root) {
+			return (await discover(root)).map((path) => ({
+				key: path,
+				locators: [path],
+			}));
 		},
 	};
 }

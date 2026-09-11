@@ -29,7 +29,19 @@ fragments of JSON.
 
 Sync reports discovery, checking and import progress with elapsed time
 on stderr. Use `--json` for quiet, machine-readable output. Counts are
-per source and phase; checking and importing are separate passes.
+per source and phase; checking and importing are separate phases.
+Unchanged inputs reuse a persistent cache and are counted in
+`files_skipped` (also included in `files_indexed`). The first sync
+after upgrading an existing archive populates this cache. No database
+reset is needed.
+
+Cache checks include file identity, size, nanosecond
+modification/change times, permissions, parser version and source
+title metadata. Changed files are fully reprocessed to preserve
+rewrites, branches and rollback history. Parsed imports are staged in
+a private temporary directory, then ingested after checking that their
+inputs are still unchanged; temporary data is removed when sync
+finishes or reports an error.
 
 Plain sync discovers standard Pi/Claude/Codex locations and reuses
 stored roots. Explicit root flags override that selection. Queries use
