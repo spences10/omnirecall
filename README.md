@@ -10,7 +10,7 @@ are not yet released. No host plugins or other adapters are included.
 ## Run
 
 Requires Node.js 24.11+ (tested on Linux with 24.15) and, for
-development, pnpm 11.22.
+development, pnpm 12.3.4.
 
 ```bash
 pnpm install --frozen-lockfile
