@@ -35,8 +35,7 @@
 		"prepack": "pnpm run build"
 	},
 	"dependencies": {
-		"citty": "catalog:",
-		"env-paths": "catalog:"
+		"citty": "catalog:"
 	},
 	"engines": {
 		"node": ">=24.11.0"

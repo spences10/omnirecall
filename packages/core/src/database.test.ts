@@ -155,9 +155,9 @@ test('source lookup, coverage and path reconciliation preserve archived sessions
 	}
 });
 
-test('reopens the version-one schema without migrating or modifying it', () => {
+test('opens the current schema read-only without modifying the database', () => {
 	const root = mkdtempSync(join(tmpdir(), 'omnirecall-schema-'));
-	const path = join(root, 'archive.sqlite');
+	const path = join(root, 'omnirecall.db');
 	try {
 		const existing = new DatabaseSync(path);
 		try {

@@ -42,8 +42,8 @@ beforeEach(() => {
 		source_config('pi', join(root, 'pi')),
 		source_config('codex', join(root, 'codex')),
 	];
-	archive = new Archive(join(root, 'archive.sqlite'));
-	inspection = new DatabaseSync(join(root, 'archive.sqlite'));
+	archive = new Archive(join(root, 'omnirecall.db'));
+	inspection = new DatabaseSync(join(root, 'omnirecall.db'));
 	writeFileSync(path_for('pi'), jsonl(pi_records()));
 	writeFileSync(path_for('codex'), jsonl(codex_records()));
 });

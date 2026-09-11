@@ -294,7 +294,6 @@ test('creates omnirecall.db in the platform data directory', () => {
 		);
 		expect(result.status, result.stderr + result.stdout).toBe(0);
 		expect(existsSync(join(data_dir, 'omnirecall.db'))).toBe(true);
-		expect(existsSync(join(data_dir, 'archive.sqlite'))).toBe(false);
 		const recalled = run_cli(['recall', 'migrations', '--json'], env);
 		expect(recalled.status, recalled.stderr + recalled.stdout).toBe(
 			0,

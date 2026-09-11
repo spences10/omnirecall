@@ -422,11 +422,12 @@ not indexed dialogue.
 Queries are archive-only, require no source access, and support exact
 source/project/session filters. Root configuration is explicit for
 sync. The archive defaults to the OS-specific data directory as
-omnirecall.db (via env-paths), with --db/OMNIRECALL_DB overrides. JSON
-is schema version 1, bounded by default to 65536 bytes, with explicit
-truncation/pagination and source coverage. Exit codes are 0 completed
-(including empty/unindexed queries), 2 partial sync, 1
-argument/operational failure. See README for exact flags.
+omnirecall.db (resolved using Node.js built-ins), with
+--db/OMNIRECALL_DB overrides. JSON is schema version 1, bounded by
+default to 65536 bytes, with explicit truncation/pagination and source
+coverage. Exit codes are 0 completed (including empty/unindexed
+queries), 2 partial sync, 1 argument/operational failure. See README
+for exact flags.
 
 ## 12. Validation and release criteria
 
