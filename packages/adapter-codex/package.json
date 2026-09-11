@@ -1,0 +1,5 @@
+{
+	"name": "@omnirecall/adapter-codex",
+	"private": true,
+	"type": "module"
+}

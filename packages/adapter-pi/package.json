@@ -1,0 +1,5 @@
+{
+	"name": "@omnirecall/adapter-pi",
+	"private": true,
+	"type": "module"
+}

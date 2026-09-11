@@ -1,7 +1,7 @@
 {
 	"name": "omnirecall",
 	"version": "0.0.2",
-	"description": "Recall coding-agent conversations — early CLI scaffold",
+	"description": "Recall Pi and Codex conversations from a durable local archive",
 	"keywords": [
 		"cli",
 		"coding-agent",
@@ -35,7 +35,7 @@
 		"prepack": "pnpm run build"
 	},
 	"dependencies": {
-		"citty": "^0.2.2"
+		"citty": "catalog:"
 	},
 	"engines": {
 		"node": ">=24.11.0"

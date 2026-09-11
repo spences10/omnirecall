@@ -1,7 +1,8 @@
 # Omni Recall — Product Requirements Document
 
-**Status:** Draft for review; basic CLI scaffold only, retrieval not
-implemented
+**Status:** Approved Pi/Codex first slice implemented in the working
+tree; retrieval additions not yet released. npm 0.0.2 scaffold already
+published. Broader multi-agent roadmap remains proposed.
 
 **Version:** 0.2
 
@@ -23,7 +24,13 @@ transcript are independent. Claude Code can search Pi history, Codex
 can search Claude Code history, and a user can search all supported
 sources from a terminal.
 
-The proposed first release provides one executable, one shared local
+The implemented preview provides Pi v3 and paginated Codex adapters,
+shared SQLite/FTS5, and sources/sync/search/recall/sessions. Claude
+and integrations below are future work, not advertised preview
+capabilities. See README for the precise support/output contract and
+limitations.
+
+The proposed broader release provides one executable, one shared local
 index/search engine, and bundled source adapters for Pi, Claude Code,
 and OpenAI Codex. It reuses suitable code and tests from
 `../pirecall`, `../ccrecall`, and `../ocrecall`, rather than
@@ -166,8 +173,10 @@ meaning belongs to the adapter.
 
 ### Normalization requirements
 
-The exact TypeScript contract and SQL schema remain to be designed
-through fixtures. The common contract must preserve:
+The first TypeScript contract and SQLite schema are implemented in
+`packages/core`, with colocated synthetic-fixture tests. Further
+adapters may refine the private contract. The common contract must
+preserve:
 
 - Source agent and configured source identity, native session/message
   IDs, and provenance locators sufficient to trace a result back to
@@ -205,9 +214,9 @@ library API. Keep their repositories, published APIs, and databases
 unchanged in the initial slice.
 
 Whether Omni Recall ultimately succeeds those tools or remains a
-companion is an open product decision. Likewise, calling its storage
-an “index” does not settle whether it retains content after source
-deletion; see section 9.
+companion is an open product decision. Retention is now decided: the
+index is a durable archive and source deletion does not delete it; see
+section 9.
 
 ### Runtime and access
 
@@ -298,23 +307,27 @@ MVP.
   user/account boundaries. Missing mounts and blocked access are not
   evidence of intentional deletion.
 
-### Unresolved: cache or durable archive
+### Decided: durable archive
 
-Two possible product behaviors remain under discussion:
+The user approved durable retention for this implementation. Indexed
+dialogue survives source deletion, archiving, unavailable roots and
+blocked permissions. Originals remain read-only. No automatic pruning
+or destructive purge command is included; archive deletion requires an
+explicit user action. Uninstalling the npm package leaves its archive.
 
-| Choice            | Consequence                                                                                                                                                                            |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Rebuildable cache | Search reflects retained source history. Confirmed source deletion eventually removes indexed content under a defined reconciliation policy.                                           |
-| Durable archive   | Indexed content can survive source deletion. Users need explicit retention, purge, backup, and uninstall expectations; rebuilding from current sources may lose archived-only history. |
+The preview stores immutable dialogue revisions and selects the latest
+successfully interpreted revision for ordinary retrieval. Older
+revisions and abandoned branches/turns remain searchable with
+`--include-history`. Titles can be refreshed separately. Removed
+sources' latest revisions remain searchable by default. Missing roots
+never imply file deletion. Status records describe last observation
+rather than live availability.
 
-The existing `ocrecall` retains indexed history after source removal.
-Gemini's current documentation describes automatic session cleanup
-after 30 days. Neither behavior implicitly decides Omni Recall's
-policy.
-
-Resolve this before real-history retention/deletion behavior is
-implemented or advertised. The initial synthetic-fixture experiment
-does not need to choose a production default.
+Back up the archive with sync stopped. Rebuilding from current sources
+cannot recover archived-only data. Revision storage is intentionally
+simple and can grow quadratically with frequent growing-file syncs;
+delta storage and explicit archive-management commands are future
+work.
 
 ## 10. First-use experience
 
@@ -383,14 +396,41 @@ version is not the current checkout version. The Codex comparison
 reused a known session ID, so it does not establish independent
 discovery or a speed advantage.
 
-The research above preceded implementation. A basic CLI scaffold now
-provides help, version, and package information. No transcript
-adapters, indexing, search, or host plugins are implemented; the
-package has not been published.
+The research above preceded implementation. The initial npm 0.0.2
+scaffold was published. The approved working-tree slice now adds a
+shared SQLite/FTS5 archive, private Pi/Codex adapters and five
+retrieval commands. No new release or host plugin is part of this
+implementation.
+
+Supported inputs: Pi v3 trees and Codex paginated completed dialogue.
+Only complete newline-terminated UTF-8 records are consumed. Malformed
+complete records, unknown semantic types, legacy history and ambiguous
+same-ID copies reject that file update with diagnostics. Files over 64
+MiB and symlink entries inside roots are unsupported. Metadata fields
+are capped at 4096 characters. Codex titles may be enriched from a
+root session_index.jsonl; native forks remain provenance, not joined
+context.
+
+Sync replays supported files twice, retaining normalized revisions and
+complete-byte checkpoints transactionally. Context uses dialogue
+parent links and byte order, not timestamp adjacency; branch ambiguity
+stops forward context. Pre-compaction originals are historical
+evidence, not a reconstruction of a model prompt. Thinking, tool
+output, summaries, response mirrors and extension materializations are
+not indexed dialogue.
+
+Queries are archive-only, require no source access, and support exact
+source/project/session filters. Root configuration is explicit for
+sync. The archive defaults to
+~/.local/share/omnirecall/archive.sqlite, with --db/OMNIRECALL_DB
+overrides. JSON is schema version 1, bounded by default to 65536
+bytes, with explicit truncation/pagination and source coverage. Exit
+codes are 0 completed (including empty/unindexed queries), 2 partial
+sync, 1 argument/operational failure. See README for exact flags.
 
 ## 12. Validation and release criteria
 
-### Smallest implementation experiment — separate approval required
+### Approved first slice — implemented
 
 Use synthetic Pi and supported paginated Codex fixtures, with a
 temporary Omni Recall index. Prove that two adapters feed one core and
@@ -414,7 +454,7 @@ Acceptance criteria:
 Do not scaffold every future adapter, publish packages, or change the
 existing tools to prove this boundary.
 
-### First-release gate
+### Broader multi-agent release gate (not all implemented)
 
 - Complete meaningful retrieval and adapter-contract tests for Pi,
   Claude Code, and explicitly supported Codex formats.
@@ -427,8 +467,8 @@ existing tools to prove this boundary.
 - Test missing history/indexes, blocked access, unavailable roots,
   empty results, partial success, and package-install failure
   handling.
-- Decide and test retention/reconciliation policy, including the
-  distinction between unavailable and deleted sources.
+- Preserve the approved durable retention policy and its tests,
+  including the distinction between unavailable and deleted sources.
 - Verify source-read-only behavior, private-data packaging exclusions,
   clean stdout JSON, documented exit codes, and bounded output on
   large sessions.
@@ -445,11 +485,11 @@ baselines; prior exploration is not a service-level commitment.
 
 ## 13. Roadmap
 
-1. **Resolve product boundaries:** settle retention and the intended
-   relationship to the sibling tools; refine the normalization
-   contract through fixtures.
-2. **Prove the shared engine:** separately approve and implement the
-   small Pi/Codex experiment in section 12.
+1. **Boundary established:** durable retention approved; sibling tools
+   remain unchanged and their eventual relationship is open.
+2. **Shared engine implemented:** review the Pi/Codex slice and its
+   synthetic cross-source retrieval/packaging validation in
+   section 12.
 3. **Ship the focused CLI:** complete the three initial adapters,
    stable retrieval output, source diagnostics, setup docs, and
    verified thin integrations.
@@ -487,8 +527,8 @@ architecture.
 
 - **Existing tools:** eventual successor or long-term companion?
   Initial work leaves them unchanged either way.
-- **Retention:** cache or durable archive; defaults, source-deletion
-  reconciliation, purge, backup, and uninstall behavior.
+- **Archive management:** future explicit purge/backup tooling and
+  space-efficient revisions; durable retention is decided.
 - **Compatibility:** supported source versions/formats, especially
   Codex legacy history and future Goose/Gemini variants.
 - **Core contract:** normalized record/update API, branch/context
@@ -502,5 +542,7 @@ architecture.
 - **Release:** final package/executable names, licence, and which host
   integrations to verify first.
 
-Approval of this PRD revision does not authorize code implementation,
-migration, deprecation, publishing, or any retention default.
+The user approved implementation of the Pi/Codex slice and durable
+archive retention. This does not authorize source migration,
+sibling-tool deprecation, version bumps, commits, publishing, or
+subsequent adapters.

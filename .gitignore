@@ -6,6 +6,8 @@ coverage/
 *.db-*
 *.sqlite
 *.sqlite-*
+*.jsonl
+*.log
 .env
 .env.*
 .DS_Store
