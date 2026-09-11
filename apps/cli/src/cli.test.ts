@@ -584,3 +584,35 @@ test('plain sync discovers available histories, reuses custom sources and respec
 		rmSync(home, { recursive: true, force: true });
 	}
 });
+
+test('sync shows progress on stderr and keeps JSON mode quiet', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omni-progress-'));
+	try {
+		const sessions = join(root, 'sessions');
+		mkdirSync(sessions);
+		writeFileSync(
+			join(sessions, 'session.jsonl'),
+			jsonl(pi_records()),
+		);
+		const args = [
+			'sync',
+			'--pi-root',
+			sessions,
+			'--db',
+			join(root, 'archive.db'),
+		];
+		const human = run_cli(args);
+		expect(human.status).toBe(0);
+		expect(human.stderr).toContain('Starting sync');
+		expect(human.stderr).toContain('Checking pi [1/1]: 1/1 items');
+		expect(human.stderr).toContain('Importing pi [1/1]: 1/1 items');
+		expect(JSON.parse(human.stdout).files_indexed).toBe(1);
+		const machine = run_cli([...args, '--json']);
+		expect(machine.status).toBe(0);
+		expect(machine.stderr).not.toContain('Starting sync');
+		expect(machine.stderr).not.toContain('Checking pi');
+		expect(JSON.parse(machine.stdout).files_indexed).toBe(1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

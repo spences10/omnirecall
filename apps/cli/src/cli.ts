@@ -24,6 +24,7 @@ import {
 	type Source,
 } from '../../../packages/core/src/types.ts';
 import { database_path } from './paths.ts';
+import { sync_progress } from './progress.ts';
 import { automatic_sources } from './sources.ts';
 
 const package_metadata = JSON.parse(
@@ -204,6 +205,7 @@ function command(name: string) {
 		},
 		async run({ args }) {
 			let archive: Archive | undefined;
+			let progress: ReturnType<typeof sync_progress> | undefined;
 			const compact =
 				name === 'read' ||
 				(name === 'search' && !args.full) ||
@@ -365,6 +367,7 @@ function command(name: string) {
 						'arguments',
 						'Provide a query of 1–1000 characters',
 					);
+				if (name === 'sync') progress = sync_progress(!args.json);
 				const db_path = database_path(args.db);
 				if (name === 'sync' || existsSync(db_path))
 					archive = new Archive(db_path, name !== 'sync');
@@ -376,11 +379,13 @@ function command(name: string) {
 								(!agent || s.agent === agent) &&
 								(!options.source || s.source_id === options.source),
 						);
-					result = await sync(archive!, selected, [
-						pi_adapter,
-						codex_adapter,
-						claude_adapter,
-					]);
+					result = await sync(
+						archive!,
+						selected,
+						[pi_adapter, codex_adapter, claude_adapter],
+						progress?.update,
+					);
+					progress?.finish();
 					if (!selected.length) {
 						result.status = 'empty';
 						result.message =
@@ -496,6 +501,7 @@ function command(name: string) {
 						: JSON.stringify(JSON.parse(output), null, 2),
 				);
 			} catch (error) {
+				progress?.finish();
 				process.exitCode = 1;
 				console.log(
 					bounded_json(
@@ -513,6 +519,7 @@ function command(name: string) {
 					),
 				);
 			} finally {
+				progress?.finish();
 				archive?.close();
 			}
 		},

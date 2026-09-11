@@ -21,10 +21,22 @@ export function error_code(error: unknown): string {
 			? 'blocked'
 			: 'error';
 }
+export interface SyncProgress {
+	phase: 'discovering' | 'checking' | 'importing' | 'source_done';
+	agent: string;
+	source_index: number;
+	source_count: number;
+	completed: number;
+	total: number;
+	files_indexed: number;
+	failures: number;
+}
+
 export async function sync(
 	archive: Archive,
 	sources: Source[],
 	adapters: Adapter[],
+	on_progress?: (progress: SyncProgress) => void,
 ) {
 	const result = {
 		status: 'ok',
@@ -56,7 +68,23 @@ export async function sync(
 			});
 		else result.issues_truncated = true;
 	};
-	for (const source of sources) {
+	for (const [source_index, source] of sources.entries()) {
+		const report = (
+			phase: SyncProgress['phase'],
+			completed = 0,
+			total = 0,
+		) =>
+			on_progress?.({
+				phase,
+				agent: source.agent,
+				source_index: source_index + 1,
+				source_count: sources.length,
+				completed,
+				total,
+				files_indexed: result.files_indexed,
+				failures: result.failures,
+			});
+		report('discovering');
 		const adapter = adapters.find((a) => a.agent === source.agent);
 		if (!adapter)
 			throw new InputError('unsupported', 'Missing adapter');
@@ -67,6 +95,7 @@ export async function sync(
 		} catch (e) {
 			archive.register(source, error_code(e));
 			issue(source, source.root, e);
+			report('source_done');
 			continue;
 		}
 		const failures = result.failures,
@@ -75,6 +104,7 @@ export async function sync(
 			source,
 			new Set(units.flatMap((u) => u.locators)),
 		);
+		report('checking', 0, units.length);
 		let titles = new Map<string, string>();
 		try {
 			titles = (await adapter.titles?.(source.root)) ?? titles;
@@ -124,7 +154,7 @@ export async function sync(
 			digest(serialized(batch.sessions));
 		const candidates: { unit: ImportUnit; hash: string }[] = [];
 		const identities = new Map<string, Set<string>>();
-		for (const unit of units) {
+		for (const [index, unit] of units.entries()) {
 			result.files_scanned += unit.locators.length;
 			try {
 				const batch = await read(unit);
@@ -145,8 +175,10 @@ export async function sync(
 					archive.path_status(source, path, error_code(e));
 				issue(source, unit.key, e);
 			}
+			report('checking', index + 1, units.length);
 		}
-		for (const candidate of candidates) {
+		report('importing', 0, candidates.length);
+		for (const [index, candidate] of candidates.entries()) {
 			try {
 				const batch = await read(candidate.unit);
 				if (hash(batch) !== candidate.hash)
@@ -195,7 +227,9 @@ export async function sync(
 					archive.path_status(source, path, error_code(e));
 				issue(source, candidate.unit.key, e);
 			}
+			report('importing', index + 1, candidates.length);
 		}
+		report('source_done', candidates.length, candidates.length);
 		archive.register(
 			source,
 			result.failures !== failures || result.partial_files !== partial

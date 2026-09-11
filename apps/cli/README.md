@@ -5,7 +5,7 @@ evidence. This working-tree preview preserves original JSON alongside
 searchable dialogue, reasoning, tool calls/results, and summaries.
 
 ```bash
-pnpx omnirecall sync --json
+pnpx omnirecall sync
 # Optional explicit locations:
 pnpx omnirecall sync --pi-root /path/to/pi/sessions \
   --codex-root /path/to/codex/history-tree \
@@ -26,6 +26,10 @@ the original record; follow `next_char_offset` for longer content.
 `sessions` returns a `first_record_ref` for walking raw history,
 including records without searchable text. Raw excerpts may be
 fragments of JSON.
+
+Sync reports discovery, checking and import progress with elapsed time
+on stderr. Use `--json` for quiet, machine-readable output. Counts are
+per source and phase; checking and importing are separate passes.
 
 Plain sync discovers standard Pi/Claude/Codex locations and reuses
 stored roots. Explicit root flags override that selection. Queries use

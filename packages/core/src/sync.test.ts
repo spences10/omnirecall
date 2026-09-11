@@ -598,3 +598,41 @@ test('invalid adapter output preserves the selected revision and checkpoint', as
 	).toEqual(checkpoint);
 	expect(archive.search('migrations', options)).toHaveLength(2);
 });
+
+test('progress covers both passes and counts rejected inputs without indexing them', async () => {
+	writeFileSync(join(root, 'pi', 'broken.jsonl'), 'broken\n');
+	const events: import('./sync.ts').SyncProgress[] = [];
+	const result = await sync(
+		archive,
+		[sources[0]!],
+		adapters,
+		(event) => events.push(event),
+	);
+	expect(events[0]).toMatchObject({
+		phase: 'discovering',
+		source_index: 1,
+		source_count: 1,
+	});
+	expect(events).toContainEqual(
+		expect.objectContaining({
+			phase: 'checking',
+			completed: 2,
+			total: 2,
+			failures: 1,
+		}),
+	);
+	expect(events).toContainEqual(
+		expect.objectContaining({
+			phase: 'importing',
+			completed: 0,
+			total: 1,
+		}),
+	);
+	expect(events.at(-1)).toMatchObject({
+		phase: 'source_done',
+		completed: 1,
+		total: 1,
+		files_indexed: result.files_indexed,
+		failures: result.failures,
+	});
+});
