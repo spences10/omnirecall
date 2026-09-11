@@ -31,6 +31,37 @@ test('indexes only completed dialogue, not response mirrors/reasoning/compacted 
 	);
 });
 
+test('omits known user attachments and references but rejects unknown content', () => {
+	function with_content(content: unknown[]) {
+		return parse([
+			...codex_records(),
+			codex_entry('event_msg', {
+				type: 'item_completed',
+				turn_id: 'turn-1',
+				item: { id: 'mixed', type: 'UserMessage', content },
+			}),
+		]);
+	}
+	const result = with_content([
+		{ type: 'image', image_url: 'synthetic' },
+		{ type: 'local_image', path: '/synthetic/image.png' },
+		{ type: 'audio', audio_url: 'synthetic' },
+		{ type: 'local_audio', path: '/synthetic/audio.wav' },
+		{ type: 'skill', name: 'synthetic', path: '/synthetic/SKILL.md' },
+		{ type: 'mention', name: 'synthetic', path: 'app://synthetic' },
+		{ type: 'text', text: 'Visible question' },
+	]);
+	expect(result.messages.at(-1)?.content).toBe('Visible question');
+	for (const block of [
+		{ type: 'future', text: 'lost' },
+		{ text: 'lost' },
+		{ type: 'thinking', thinking: 'hidden' },
+	])
+		expect(() => with_content([block])).toThrow(
+			'Unknown dialogue content block type',
+		);
+});
+
 test('zero-turn rollback does not roll back everything', () => {
 	const result = parse([
 		...codex_records(),

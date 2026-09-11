@@ -47,6 +47,35 @@ test.each([
 	expect(() => parse([...pi_records(), extra])).toThrow();
 });
 
+test('omits known non-dialogue blocks and rejects unknown or missing block types', () => {
+	const result = parse([
+		...pi_records(),
+		pi_entry('mixed', 'u2', 'assistant', [
+			{ type: 'thinking', thinking: 'hidden' },
+			{ type: 'toolCall', id: 'call', name: 'read', arguments: {} },
+			{ type: 'text', text: 'Visible answer' },
+		]),
+		pi_entry('image', 'mixed', 'user', [
+			{ type: 'image', data: 'synthetic', mimeType: 'image/png' },
+			{ type: 'text', text: 'Visible question' },
+		]),
+	]);
+	expect(
+		result.messages.slice(-2).map((message) => message.content),
+	).toEqual(['Visible answer', 'Visible question']);
+	for (const block of [
+		{ type: 'future', text: 'lost' },
+		{ text: 'lost' },
+		{ type: 'local_image', path: '/synthetic' },
+	])
+		expect(() =>
+			parse([
+				...pi_records(),
+				pi_entry('unknown', 'u2', 'user', [block]),
+			]),
+		).toThrow('Unknown dialogue content block type');
+});
+
 test('uses last serialized leaf, not timestamp order, and excludes sibling branches', () => {
 	const result = parse([
 		...pi_records(),

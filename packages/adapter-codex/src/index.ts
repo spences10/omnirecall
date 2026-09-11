@@ -180,7 +180,19 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				);
 			ensure_turn(turn_id);
 			const id = text(item.id);
-			const content = dialogue(item.content);
+			const content = dialogue(
+				item.content,
+				item_type === 'UserMessage'
+					? [
+							'image',
+							'local_image',
+							'audio',
+							'local_audio',
+							'skill',
+							'mention',
+						]
+					: [],
+			);
 			const previous = messages.get(id);
 			const role = item_type === 'UserMessage' ? 'user' : 'assistant';
 			if (previous) {

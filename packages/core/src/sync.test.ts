@@ -267,6 +267,54 @@ test('complete UTF-8 checkpoints survive partial writes and invalid complete lin
 	expect(archive.search('Résumé', options)).toHaveLength(1);
 });
 
+test.each(['pi', 'codex'])(
+	'%s unknown content rejects the update and preserves archived dialogue and checkpoint',
+	async (agent) => {
+		await sync(archive, sources, adapters);
+		const checkpoint = inspection
+			.prepare(
+				'SELECT revision_id, byte_offset FROM paths WHERE path=?',
+			)
+			.get(path_for(agent));
+		const content = [
+			{ type: 'text', text: 'uncommitted keyword' },
+			{
+				type: 'future_dialogue',
+				text: 'evidence must not disappear',
+			},
+		];
+		const entry =
+			agent === 'pi'
+				? pi_entry('future', 'u2', 'assistant', content)
+				: codex_entry('event_msg', {
+						type: 'item_completed',
+						turn_id: 'turn-1',
+						item: { id: 'future', type: 'AgentMessage', content },
+					});
+		appendFileSync(path_for(agent), jsonl([entry]));
+		const result = await sync(archive, sources, adapters);
+		expect(result).toMatchObject({
+			status: 'partial',
+			failures: 1,
+			files_indexed: 1,
+			revisions_added: 0,
+		});
+		expect(result.issues[0]).toMatchObject({
+			path: path_for(agent),
+			code: 'unsupported',
+		});
+		expect(archive.search('uncommitted', options)).toEqual([]);
+		expect(archive.search('migrations', options)).toHaveLength(2);
+		expect(
+			inspection
+				.prepare(
+					'SELECT revision_id, byte_offset FROM paths WHERE path=?',
+				)
+				.get(path_for(agent)),
+		).toEqual(checkpoint);
+	},
+);
+
 test('file transaction rolls back FTS, revision selection and checkpoint', async () => {
 	await sync(archive, sources, adapters);
 	const before = inspection.prepare('SELECT * FROM revisions').all();

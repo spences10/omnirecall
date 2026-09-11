@@ -81,14 +81,27 @@ export function date(value: unknown): string {
 	return new Date(timestamp).toISOString();
 }
 
-export function dialogue(value: unknown): string {
+export function dialogue(
+	value: unknown,
+	omitted_types: readonly string[] = [],
+): string {
 	if (typeof value === 'string') return value;
 	if (!Array.isArray(value))
 		throw new InputError('invalid', 'Expected message content');
 	return value
 		.flatMap((part: unknown) => {
 			const block = object(part);
-			if (block.type !== 'text') return [];
+			if (block.type !== 'text') {
+				if (
+					typeof block.type === 'string' &&
+					omitted_types.includes(block.type)
+				)
+					return [];
+				throw new InputError(
+					'unsupported',
+					'Unknown dialogue content block type',
+				);
+			}
 			if (typeof block.text !== 'string')
 				throw new InputError('invalid', 'Invalid text block');
 			return [block.text];

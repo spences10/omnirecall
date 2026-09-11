@@ -53,7 +53,11 @@ export function parse_pi(records: RecordLine[]): Transcript {
 		if (entry.type === 'message') {
 			const message = object(entry.message);
 			if (message.role === 'user' || message.role === 'assistant') {
-				const content = dialogue(message.content);
+				const content = dialogue(message.content, [
+					'thinking',
+					'image',
+					'toolCall',
+				]);
 				if (content.trim()) {
 					const normalized: Message = {
 						native_id: id,

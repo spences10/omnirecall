@@ -51,7 +51,8 @@ export function bounded_json(
 			});
 		rows.pop();
 		result.truncated = true;
-		if (Array.isArray(result.results)) {
+		if (rows === result.issues) result.issues_truncated = true;
+		if (rows === result.results && Array.isArray(result.results)) {
 			result.returned_count = result.results.length;
 			result.has_more = true;
 			result.next_offset =
