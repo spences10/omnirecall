@@ -1,4 +1,5 @@
-import { discover_jsonl } from '../../core/src/files.ts';
+import { preserve_records } from '../../adapter-shared/src/evidence.ts';
+import { jsonl_adapter } from '../../core/src/files.ts';
 import {
 	date,
 	dialogue,
@@ -6,7 +7,6 @@ import {
 	metadata,
 	object,
 	text,
-	type Adapter,
 	type Message,
 	type RecordLine,
 	type Transcript,
@@ -26,7 +26,7 @@ export function parse_pi(records: RecordLine[]): Transcript {
 		parent_session: metadata(header.parentSession),
 		timestamp: date(header.timestamp),
 		messages: [],
-		omitted_records: 0,
+		unindexed_records: 0,
 	};
 	const parents = new Map<string, string | null>();
 	const nearest_message = new Map<string, string | null>();
@@ -85,7 +85,7 @@ export function parse_pi(records: RecordLine[]): Transcript {
 					'unsupported',
 					'Unknown Pi message role',
 				);
-			} else result.omitted_records++;
+			} else result.unindexed_records++;
 		} else if (entry.type === 'session_info') {
 			result.title = metadata(entry.name);
 		} else if (
@@ -99,7 +99,7 @@ export function parse_pi(records: RecordLine[]): Transcript {
 				'label',
 			].includes(String(entry.type))
 		) {
-			result.omitted_records++;
+			result.unindexed_records++;
 		} else
 			throw new InputError('unsupported', 'Unknown Pi entry type');
 		nearest_message.set(id, ancestor);
@@ -111,11 +111,7 @@ export function parse_pi(records: RecordLine[]): Transcript {
 	}
 	for (const message of result.messages)
 		message.active = active_ids.has(message.native_id);
-	return result;
+	return preserve_records(records, result, 'pi');
 }
 
-export const pi_adapter: Adapter = {
-	agent: 'pi',
-	discover: discover_jsonl,
-	parse: parse_pi,
-};
+export const pi_adapter = jsonl_adapter('pi', parse_pi);

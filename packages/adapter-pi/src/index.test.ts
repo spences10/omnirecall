@@ -32,10 +32,12 @@ test('extracts named v3 dialogue and skips reasoning/tools/compaction materializ
 		['u1', 'a1', 'u2'],
 	);
 	expect(result.messages[2]?.parent_id).toBe('a1');
-	expect(JSON.stringify(result)).not.toContain(
+	expect(JSON.stringify(result.messages)).not.toContain(
 		'hidden-secret-thought',
 	);
-	expect(JSON.stringify(result)).not.toContain('summary-only');
+	expect(JSON.stringify(result.messages)).not.toContain(
+		'summary-only',
+	);
 });
 
 test.each([

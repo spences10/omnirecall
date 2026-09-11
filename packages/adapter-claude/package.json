@@ -1,0 +1,5 @@
+{
+	"name": "@omnirecall/adapter-claude",
+	"private": true,
+	"type": "module"
+}

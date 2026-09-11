@@ -1,6 +1,8 @@
 import { join } from 'node:path';
+import { preserve_records } from '../../adapter-shared/src/evidence.ts';
 import {
 	discover_jsonl,
+	jsonl_adapter,
 	read_snapshot,
 } from '../../core/src/files.ts';
 import {
@@ -10,7 +12,6 @@ import {
 	metadata,
 	object,
 	text,
-	type Adapter,
 	type Message,
 	type RecordLine,
 	type Transcript,
@@ -36,7 +37,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		parent_session: metadata(meta.forked_from_id),
 		timestamp: date(header.timestamp),
 		messages: [],
-		omitted_records: 0,
+		unindexed_records: 0,
 	};
 	const turns: { id: string; active: boolean }[] = [];
 	const messages = new Map<string, Message>();
@@ -96,7 +97,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				'world_state',
 			].includes(String(entry.type))
 		) {
-			result.omitted_records++;
+			result.unindexed_records++;
 			continue;
 		}
 		if (entry.type !== 'event_msg')
@@ -158,7 +159,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 						'unsupported',
 						'Unknown Codex completed item',
 					);
-				result.omitted_records++;
+				result.unindexed_records++;
 				continue;
 			}
 			if (
@@ -203,6 +204,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 					);
 				previous.content = content;
 				previous.timestamp = timestamp;
+				previous.source_order = byte_offset;
 			} else if (content.trim()) {
 				messages.set(id, {
 					native_id: id,
@@ -228,12 +230,15 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				'thread_settings_applied',
 			].includes(String(payload.type))
 		) {
-			result.omitted_records++;
+			result.unindexed_records++;
 		} else
 			throw new InputError('unsupported', 'Unknown Codex event type');
 	}
 	result.messages = [...messages.values()];
-	return result;
+	result.inactive_turns = turns
+		.filter((t) => !t.active)
+		.map((t) => t.id);
+	return preserve_records(records, result, 'codex');
 }
 
 export async function session_titles(
@@ -270,12 +275,11 @@ export async function session_titles(
 	return new Map([...titles].map(([id, value]) => [id, value.title]));
 }
 
-export const codex_adapter: Adapter = {
-	agent: 'codex',
-	discover: async (root) =>
+export const codex_adapter = Object.assign(
+	jsonl_adapter('codex', parse_codex, async (root) =>
 		(await discover_jsonl(root)).filter(
 			(path) => path !== join(root, 'session_index.jsonl'),
 		),
-	parse: parse_codex,
-	titles: session_titles,
-};
+	),
+	{ titles: session_titles },
+);

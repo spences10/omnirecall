@@ -1,15 +1,21 @@
 import { Archive } from './database.ts';
-import { read_snapshot } from './files.ts';
-import { InputError, type Adapter, type Source } from './types.ts';
-
+import { digest } from './files.ts';
+import {
+	InputError,
+	type Adapter,
+	type ImportResult,
+	type ImportUnit,
+	type Source,
+} from './types.ts';
 export function error_code(error: unknown): string {
-	if (error instanceof InputError) return error.code;
 	const code = (error as NodeJS.ErrnoException)?.code;
-	if (code === 'ENOENT') return 'missing';
-	if (code === 'EACCES' || code === 'EPERM') return 'blocked';
-	return 'error';
+	if (error instanceof InputError) return error.code;
+	return code === 'ENOENT'
+		? 'missing'
+		: code === 'EACCES' || code === 'EPERM'
+			? 'blocked'
+			: 'error';
 }
-
 export async function sync(
 	archive: Archive,
 	sources: Source[],
@@ -23,7 +29,7 @@ export async function sync(
 		partial_files: 0,
 		failures: 0,
 		operational_failures: 0,
-		omitted_records: 0,
+		unindexed_records: 0,
 		issues: [] as {
 			source_id: string;
 			path: string;
@@ -32,7 +38,7 @@ export async function sync(
 		}[],
 		issues_truncated: false,
 	};
-	function issue(source: Source, path: string, error: unknown) {
+	const issue = (source: Source, path: string, error: unknown) => {
 		result.failures++;
 		if (error_code(error) === 'error') result.operational_failures++;
 		if (result.issues.length < 100)
@@ -41,101 +47,146 @@ export async function sync(
 				path,
 				code: error_code(error),
 				message:
-					error instanceof Error
-						? error.message
-						: 'Unknown source/index operation failure',
+					error instanceof Error ? error.message : 'Import failed',
 			});
 		else result.issues_truncated = true;
-	}
+	};
 	for (const source of sources) {
-		const adapter = adapters.find(
-			(candidate) => candidate.agent === source.agent,
-		);
-		if (!adapter) throw new Error('Missing adapter');
+		const adapter = adapters.find((a) => a.agent === source.agent);
+		if (!adapter)
+			throw new InputError('unsupported', 'Missing adapter');
 		archive.register(source, 'checking');
-		let files: string[];
+		let units: ImportUnit[];
 		try {
-			files = await adapter.discover(source.root);
-		} catch (error) {
-			archive.register(source, error_code(error));
-			issue(source, source.root, error);
+			units = await adapter.discover(source.root);
+		} catch (e) {
+			archive.register(source, error_code(e));
+			issue(source, source.root, e);
 			continue;
 		}
-		const source_failures = result.failures;
-		const partial_before = result.partial_files;
+		const failures = result.failures,
+			partial = result.partial_files;
+		archive.reconcile_paths(
+			source,
+			new Set(units.flatMap((u) => u.locators)),
+		);
 		let titles = new Map<string, string>();
 		try {
 			titles = (await adapter.titles?.(source.root)) ?? titles;
-		} catch (error) {
-			issue(source, source.root, error);
+		} catch (e) {
+			issue(source, source.root, e);
 		}
-		archive.reconcile_paths(source, new Set(files));
-		// Detect divergent copies before changing the selected revision. Keep only hashes between passes.
-		const candidates: {
-			path: string;
-			native_id: string;
-			hash: string;
-		}[] = [];
+		const read = async (unit: ImportUnit) => {
+			const batch = await adapter.read(unit);
+			if (!batch.inputs.length || !batch.sessions.length)
+				throw new InputError(
+					'unsupported',
+					'Import unit contains no supported sessions or inputs',
+				);
+			for (const session of batch.sessions)
+				for (const record of session.records ?? []) {
+					if (batch.inputs.length > 1 && !record.input_path)
+						throw new InputError(
+							'invalid',
+							'Multi-input records require input provenance',
+						);
+					if (
+						record.input_path &&
+						!batch.inputs.some((i) => i.path === record.input_path)
+					)
+						throw new InputError(
+							'invalid',
+							'Record references an unknown input',
+						);
+				}
+			for (const session of batch.sessions)
+				session.title =
+					titles.get(session.native_id) ?? session.title;
+			return batch;
+		};
+		const serialized = (value: unknown) =>
+			JSON.stringify(value, (key, value) =>
+				key === 'input_path' ? undefined : value,
+			);
+		const hash = (batch: ImportResult) =>
+			digest(serialized(batch.sessions));
+		const candidates: { unit: ImportUnit; hash: string }[] = [];
 		const identities = new Map<string, Set<string>>();
-		for (const path of files) {
-			result.files_scanned++;
+		for (const unit of units) {
+			result.files_scanned += unit.locators.length;
 			try {
-				const snapshot = await read_snapshot(path);
-				const transcript = adapter.parse(snapshot.records);
-				const hashes =
-					identities.get(transcript.native_id) ?? new Set<string>();
-				hashes.add(snapshot.hash);
-				identities.set(transcript.native_id, hashes);
-				candidates.push({
-					path,
-					native_id: transcript.native_id,
-					hash: snapshot.hash,
-				});
-			} catch (error) {
-				archive.path_status(source, path, error_code(error));
-				issue(source, path, error);
+				const batch = await read(unit);
+				candidates.push({ unit, hash: hash(batch) });
+				for (const session of batch.sessions) {
+					const hashes =
+						identities.get(
+							session.session_key ?? session.native_id,
+						) ?? new Set<string>();
+					hashes.add(digest(serialized(session)));
+					identities.set(
+						session.session_key ?? session.native_id,
+						hashes,
+					);
+				}
+			} catch (e) {
+				for (const path of unit.locators)
+					archive.path_status(source, path, error_code(e));
+				issue(source, unit.key, e);
 			}
 		}
 		for (const candidate of candidates) {
 			try {
-				if (identities.get(candidate.native_id)!.size > 1)
-					throw new InputError(
-						'conflict',
-						'Divergent files share a native session ID; no revision selected',
-					);
-				const snapshot = await read_snapshot(candidate.path);
-				if (snapshot.hash !== candidate.hash)
+				const batch = await read(candidate.unit);
+				if (hash(batch) !== candidate.hash)
 					throw new InputError(
 						'changed',
 						'Source changed between discovery and ingestion; retry sync',
 					);
-				const transcript = adapter.parse(snapshot.records);
-				transcript.title =
-					titles.get(transcript.native_id) ?? transcript.title;
-				const stored = archive.store(
-					source,
-					candidate.path,
-					transcript,
-					snapshot,
-					titles.has(transcript.native_id),
-				);
-				result.files_indexed++;
-				if (stored.added) result.revisions_added++;
-				result.omitted_records += transcript.omitted_records;
-				if (snapshot.partial) result.partial_files++;
-			} catch (error) {
-				archive.path_status(
-					source,
-					candidate.path,
-					error_code(error),
-				);
-				issue(source, candidate.path, error);
+				for (const session of batch.sessions) {
+					if (
+						identities.get(session.session_key ?? session.native_id)!
+							.size > 1
+					)
+						throw new InputError(
+							'conflict',
+							'Divergent inputs share a native session ID; no revision selected',
+						);
+				}
+				let added = 0,
+					unindexed = 0;
+				archive.atomic(() => {
+					for (const session of batch.sessions) {
+						const stored = archive.store(
+							source,
+							batch.inputs[0]!.path,
+							session,
+							{
+								parser_version: adapter.parser_version,
+								hash: digest(serialized(session)),
+								byte_offset: batch.inputs[0]!.byte_offset,
+								partial: batch.inputs.some((i) => i.partial),
+								inputs: batch.inputs,
+							},
+						);
+						if (stored.added) added++;
+						unindexed += session.unindexed_records;
+					}
+				});
+				result.revisions_added += added;
+				result.unindexed_records += unindexed;
+				result.files_indexed += batch.inputs.length;
+				result.partial_files += batch.inputs.filter(
+					(i) => i.partial,
+				).length;
+			} catch (e) {
+				for (const path of candidate.unit.locators)
+					archive.path_status(source, path, error_code(e));
+				issue(source, candidate.unit.key, e);
 			}
 		}
 		archive.register(
 			source,
-			source_failures !== result.failures ||
-				partial_before !== result.partial_files
+			result.failures !== failures || result.partial_files !== partial
 				? 'partial'
 				: 'available',
 		);

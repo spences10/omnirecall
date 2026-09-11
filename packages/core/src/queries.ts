@@ -1,5 +1,5 @@
 const message_columns = (start = '1', count = '4000') => `
-	m.rowid, m.revision_id, m.native_id, m.parent_id, m.role,
+	m.rowid, m.revision_id, m.native_id, m.parent_id, m.role, m.kind, m.representation, m.state, m.record_key, m.json_pointer,
 	substr(m.content, ${start}, ${count}) AS content,
 	length(m.content) >= (${start}) + (${count}) AS content_truncated,
 	m.timestamp, m.source_order, m.active, m.turn_id
@@ -19,10 +19,10 @@ const session_filter = `
 
 // Select one path so its location and status always describe the same observation.
 const provenance_join = `
-	LEFT JOIN paths p ON p.rowid = (
+	LEFT JOIN resources p ON p.rowid = (
 		SELECT candidate.rowid
-		FROM paths candidate
-		WHERE candidate.revision_id = r.revision_id
+		FROM resources candidate
+		WHERE EXISTS (SELECT 1 FROM revision_inputs ri WHERE ri.revision_id = r.revision_id AND ri.source_id=candidate.source_id AND ri.path=candidate.path)
 		ORDER BY
 			CASE candidate.status
 				WHEN 'available' THEN 0
@@ -47,7 +47,7 @@ export const sql = {
 		WHERE source_id = $source_id
 	`,
 	source_paths: `
-		SELECT path FROM paths WHERE source_id = $source_id
+		SELECT path FROM resources WHERE source_id = $source_id
 	`,
 	find_revision: `
 		SELECT revision_id FROM revisions WHERE revision_id = $revision_id
@@ -68,28 +68,25 @@ export const sql = {
 	insert_revision: `
 		INSERT INTO revisions (
 			revision_id, session_id, hash, parser_version, project, title,
-			parent_session, timestamp, indexed_at, omitted_records, recorded_path
+			parent_session, timestamp, indexed_at, unindexed_records, recorded_path
 		)
 		VALUES (
 			$revision_id, $session_id, $hash, $parser_version, $project, $title,
-			$parent_session, $timestamp, $indexed_at, $omitted_records, $recorded_path
+			$parent_session, $timestamp, $indexed_at, $unindexed_records, $recorded_path
 		)
 	`,
 	insert_message: `
-		INSERT INTO messages (
-			revision_id, native_id, parent_id, role, content,
+		INSERT INTO parts (
+			revision_id, native_id, parent_id, role, kind, representation, state, record_key, json_pointer, content,
 			timestamp, source_order, active, turn_id
 		)
 		VALUES (
-			$revision_id, $native_id, $parent_id, $role, $content,
+			$revision_id, $native_id, $parent_id, $role, $kind, $representation, $state, $record_key, $json_pointer, $content,
 			$timestamp, $source_order, $active, $turn_id
 		)
 	`,
-	refresh_title: `
-		UPDATE revisions SET title = $title WHERE revision_id = $revision_id
-	`,
 	store_path: `
-		INSERT INTO paths (
+		INSERT INTO resources (
 			source_id, path, session_id, revision_id, status,
 			byte_offset, parser_version, checked_at
 		)
@@ -106,7 +103,7 @@ export const sql = {
 			checked_at = excluded.checked_at
 	`,
 	path_status: `
-		INSERT INTO paths (source_id, path, status, checked_at)
+		INSERT INTO resources (source_id, path, status, checked_at)
 		VALUES ($source_id, $path, $status, $checked_at)
 		ON CONFLICT (source_id, path) DO UPDATE SET
 			status = excluded.status,
@@ -137,7 +134,7 @@ export const sql = {
 			t.session_id, t.native_id, s.source_id, s.agent, s.root,
 			s.status AS source_status, s.checked_at AS source_checked_at,
 			r.revision_id, r.hash, r.parser_version, r.project, r.title,
-			r.parent_session, r.timestamp, r.indexed_at, r.omitted_records,
+			r.parent_session, r.timestamp, r.indexed_at, r.unindexed_records,
 			r.recorded_path,
 			(r.revision_id = t.current_revision) AS current_revision,
 			${provenance_columns}
@@ -154,21 +151,22 @@ export const sql = {
 			${message_columns()},
 			t.session_id, s.source_id, s.agent, s.root,
 			s.status AS source_status, s.checked_at AS source_checked_at,
-			r.project, r.title, r.parent_session, r.indexed_at, r.omitted_records,
+			r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
 			(r.revision_id = t.current_revision) AS current_revision,
 			${provenance_columns},
-			substr(snippet(messages_fts, 0, '', '', '…', 32), 1, 4000) AS snippet,
-			max(0, instr(m.content, snippet(messages_fts, 0, '', '', '', 32)) - 1) AS char_offset,
-			bm25(messages_fts) AS relevance
-		FROM messages_fts
-		JOIN messages m ON m.rowid = messages_fts.rowid
+			substr(snippet(parts_fts, 0, '', '', '…', 32), 1, 4000) AS snippet,
+			max(0, instr(m.content, snippet(parts_fts, 0, '', '', '', 32)) - 1) AS char_offset,
+			bm25(parts_fts) AS relevance
+		FROM parts_fts
+		JOIN parts m ON m.rowid = parts_fts.rowid
 		JOIN revisions r USING (revision_id)
 		JOIN sessions t ON t.session_id = r.session_id
 		JOIN sources s USING (source_id)
 		${provenance_join}
-		WHERE messages_fts MATCH $query
+		WHERE parts_fts MATCH $query
 			AND ${session_filter}
-			AND ($include_history = 1 OR m.active = 1)
+			AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+			AND ($kind IS NULL OR m.kind = $kind)
 			AND ($after IS NULL OR m.timestamp >= $after)
 			AND ($before IS NULL OR m.timestamp <= $before)
 		ORDER BY relevance, m.timestamp DESC, t.session_id,
@@ -180,10 +178,10 @@ export const sql = {
 			length(m.content) AS content_length,
 			t.session_id, s.source_id, s.agent, s.root,
 			s.status AS source_status, s.checked_at AS source_checked_at,
-			r.project, r.title, r.parent_session, r.indexed_at, r.omitted_records,
+			r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
 			(r.revision_id = t.current_revision) AS current_revision,
 			${provenance_columns}
-		FROM messages m
+		FROM parts m
 		JOIN revisions r USING (revision_id)
 		JOIN sessions t ON t.session_id = r.session_id
 		JOIN sources s USING (source_id)
@@ -192,14 +190,15 @@ export const sql = {
 	`,
 	message: `
 		SELECT ${message_columns()}
-		FROM messages m
+		FROM parts m
 		WHERE m.revision_id = $revision_id AND m.native_id = $native_id
 	`,
 	children: `
 		SELECT ${message_columns()}
-		FROM messages m
+		FROM parts m
 		WHERE m.revision_id = $revision_id
 			AND m.parent_id = $parent_id AND m.active = $active
+            AND ($kind != 'message' OR m.kind = 'message')
 		ORDER BY m.source_order
 		LIMIT 2
 	`,

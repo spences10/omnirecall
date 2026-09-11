@@ -11,7 +11,7 @@ import {
 } from './types.ts';
 
 export const max_file_bytes = 64 * 1024 * 1024;
-export const parser_version = 1;
+export const parser_version = 2;
 
 export function digest(value: string | Buffer): string {
 	return createHash('sha256').update(value).digest('hex');
@@ -99,6 +99,7 @@ export async function read_snapshot(path: string) {
 				if (line.trim())
 					records.push({
 						value: object(JSON.parse(line)),
+						raw_json: line,
 						byte_offset: start,
 					});
 			} catch {
@@ -120,4 +121,36 @@ export async function read_snapshot(path: string) {
 	} finally {
 		await handle.close();
 	}
+}
+
+// Format helpers are optional adapter machinery, not the core import contract.
+export function jsonl_adapter(
+	agent: string,
+	parse: import('./types.ts').JsonlAdapter['parse'],
+	discover = discover_jsonl,
+): import('./types.ts').JsonlAdapter {
+	return {
+		agent,
+		parse,
+		parser_version,
+		async discover(root) {
+			return (await discover(root)).map((path) => ({
+				key: path,
+				locators: [path],
+			}));
+		},
+		async read(unit) {
+			if (unit.locators.length !== 1)
+				throw new InputError(
+					'invalid',
+					'JSONL unit requires one input',
+				);
+			const path = unit.locators[0]!;
+			const snapshot = await read_snapshot(path);
+			return {
+				sessions: [this.parse(snapshot.records, path)],
+				inputs: [{ path, ...snapshot }],
+			};
+		},
+	};
 }

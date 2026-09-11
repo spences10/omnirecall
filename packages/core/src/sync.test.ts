@@ -79,10 +79,12 @@ test('cross-agent archive, source-qualified collisions, equal timestamps, contex
 		]);
 		expect(match.title).toContain('migration plan');
 	}
-	expect(archive.search('hidden-secret-thought', options)).toEqual(
-		[],
+	expect(
+		archive.search('hidden-secret-thought', options),
+	).toHaveLength(1);
+	expect(archive.search('private-tool-output', options)).toHaveLength(
+		2,
 	);
-	expect(archive.search('private-tool-output', options)).toEqual([]);
 	expect(
 		archive.search('migrations', { ...options, agent: 'pi' }),
 	).toHaveLength(1);
@@ -120,8 +122,8 @@ test('cross-agent archive, source-qualified collisions, equal timestamps, contex
 		(await sync(archive, sources, adapters)).revisions_added,
 	).toBe(0);
 	expect(
-		inspection.prepare('SELECT * FROM messages').all(),
-	).toHaveLength(6);
+		inspection.prepare('SELECT * FROM parts').all(),
+	).toHaveLength(9);
 	for (let i = 0; i < sources.length; i++)
 		expect(readFileSync(path_for(sources[i]!.agent))).toEqual(
 			originals[i],
@@ -130,7 +132,7 @@ test('cross-agent archive, source-qualified collisions, equal timestamps, contex
 
 test('all failed file transactions report an operational failure with no committed progress', async () => {
 	inspection.exec(
-		"CREATE TRIGGER fail_message BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;",
+		"CREATE TRIGGER fail_message BEFORE INSERT ON parts BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;",
 	);
 	const result = await sync(archive, sources, adapters);
 	expect(result.status).toBe('error');
@@ -141,7 +143,7 @@ test('all failed file transactions report an operational failure with no committ
 	);
 	expect(
 		inspection
-			.prepare('SELECT byte_offset FROM paths')
+			.prepare('SELECT byte_offset FROM resources')
 			.all()
 			.every((row) => row.byte_offset === null),
 	).toBe(true);
@@ -168,7 +170,7 @@ test('SQL-level excerpts stay bounded and a late match remains visible in its sn
 	expect(() => archive.search('" OR 1=1 --', options)).not.toThrow();
 });
 
-test('Codex sidecar titles refresh without a new transcript revision', async () => {
+test('Codex sidecar titles create an immutable metadata revision', async () => {
 	await sync(archive, sources, adapters);
 	const index = join(root, 'codex', 'session_index.jsonl');
 	writeFileSync(
@@ -189,7 +191,7 @@ test('Codex sidecar titles refresh without a new transcript revision', async () 
 	const original = readFileSync(index);
 	const result = await sync(archive, sources, adapters);
 	expect(result.status).toBe('ok');
-	expect(result.revisions_added).toBe(0);
+	expect(result.revisions_added).toBe(1);
 	expect(
 		archive.search('migrations', { ...options, agent: 'codex' })[0]
 			?.title,
@@ -200,12 +202,12 @@ test('Codex sidecar titles refresh without a new transcript revision', async () 
 	expect(
 		archive.search('migrations', { ...options, agent: 'codex' })[0]
 			?.title,
-	).toBe('Latest title');
+	).toBe('Codex migration plan');
 });
 
 test('a change between discovery and ingestion is reported without selecting it', async () => {
 	await sync(archive, sources, adapters);
-	const changing: Adapter = {
+	const changing: import('./types.ts').JsonlAdapter = {
 		...pi_adapter,
 		parse: (records) => {
 			const transcript = pi_adapter.parse(records);
@@ -253,7 +255,7 @@ test('complete UTF-8 checkpoints survive partial writes and invalid complete lin
 	).toBe(1);
 	expect(archive.search('Résumé', options)).toHaveLength(1);
 	const checkpoint = inspection
-		.prepare('SELECT byte_offset FROM paths WHERE path=?')
+		.prepare('SELECT byte_offset FROM resources WHERE path=?')
 		.get(path_for('pi'));
 	appendFileSync(path_for('pi'), 'broken-json\n');
 	expect(
@@ -261,7 +263,7 @@ test('complete UTF-8 checkpoints survive partial writes and invalid complete lin
 	).toBe('invalid');
 	expect(
 		inspection
-			.prepare('SELECT byte_offset FROM paths WHERE path=?')
+			.prepare('SELECT byte_offset FROM resources WHERE path=?')
 			.get(path_for('pi')),
 	).toEqual(checkpoint);
 	expect(archive.search('Résumé', options)).toHaveLength(1);
@@ -273,7 +275,7 @@ test.each(['pi', 'codex'])(
 		await sync(archive, sources, adapters);
 		const checkpoint = inspection
 			.prepare(
-				'SELECT revision_id, byte_offset FROM paths WHERE path=?',
+				'SELECT revision_id, byte_offset FROM resources WHERE path=?',
 			)
 			.get(path_for(agent));
 		const content = [
@@ -308,7 +310,7 @@ test.each(['pi', 'codex'])(
 		expect(
 			inspection
 				.prepare(
-					'SELECT revision_id, byte_offset FROM paths WHERE path=?',
+					'SELECT revision_id, byte_offset FROM resources WHERE path=?',
 				)
 				.get(path_for(agent)),
 		).toEqual(checkpoint);
@@ -319,14 +321,16 @@ test('file transaction rolls back FTS, revision selection and checkpoint', async
 	await sync(archive, sources, adapters);
 	const before = inspection.prepare('SELECT * FROM revisions').all();
 	const checkpoint = inspection
-		.prepare('SELECT revision_id,byte_offset FROM paths WHERE path=?')
+		.prepare(
+			'SELECT revision_id,byte_offset FROM resources WHERE path=?',
+		)
 		.get(path_for('pi'));
 	appendFileSync(
 		path_for('pi'),
 		jsonl([pi_entry('a2', 'u2', 'assistant', 'transaction keyword')]),
 	);
 	inspection.exec(
-		"CREATE TRIGGER fail_message BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;",
+		"CREATE TRIGGER fail_message BEFORE INSERT ON parts BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;",
 	);
 	expect((await sync(archive, sources, adapters)).failures).toBe(1);
 	expect(inspection.prepare('SELECT * FROM revisions').all()).toEqual(
@@ -335,7 +339,7 @@ test('file transaction rolls back FTS, revision selection and checkpoint', async
 	expect(
 		inspection
 			.prepare(
-				'SELECT revision_id,byte_offset FROM paths WHERE path=?',
+				'SELECT revision_id,byte_offset FROM resources WHERE path=?',
 			)
 			.get(path_for('pi')),
 	).toEqual(checkpoint);
@@ -376,7 +380,7 @@ test('movement, replacement, deletion and unavailable roots never delete archive
 	).toBe('missing');
 	expect(
 		inspection
-			.prepare('SELECT status FROM paths WHERE path=?')
+			.prepare('SELECT status FROM resources WHERE path=?')
 			.get(path_for('codex'))?.status,
 	).toBe('available');
 });
@@ -397,7 +401,7 @@ test('blocked discovery retains known paths and reports access failure', async (
 	).toBe('blocked');
 	expect(
 		inspection
-			.prepare('SELECT status FROM paths WHERE path=?')
+			.prepare('SELECT status FROM resources WHERE path=?')
 			.get(path_for('pi'))?.status,
 	).toBe('available');
 });
@@ -517,7 +521,7 @@ test('Codex rollback and item correction preserve old revisions without lineariz
 			...options,
 			include_history: true,
 		}),
-	).toHaveLength(1);
+	).toHaveLength(2);
 	expect(archive.search('revised', options)).toHaveLength(1);
 });
 

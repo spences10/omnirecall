@@ -1,7 +1,7 @@
 {
 	"name": "omnirecall",
 	"version": "0.0.2",
-	"description": "Recall Pi and Codex conversations from a durable local archive",
+	"description": "Recall coding-agent session evidence from a durable local archive",
 	"keywords": [
 		"cli",
 		"coding-agent",

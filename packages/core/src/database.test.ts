@@ -17,7 +17,7 @@ const transcript: Transcript = {
 	title: 'Test session',
 	parent_session: null,
 	timestamp: '2026-01-01T00:00:00.000Z',
-	omitted_records: 0,
+	unindexed_records: 0,
 	messages: [
 		{
 			native_id: 'message',
@@ -95,9 +95,7 @@ test('reuses statements across imports and retrievals', () => {
 		}
 		const queries = prepare.mock.calls.map(([query]) => query);
 		expect(
-			queries.filter((query) =>
-				query.includes('INSERT INTO messages'),
-			),
+			queries.filter((query) => query.includes('INSERT INTO parts')),
 		).toHaveLength(1);
 		expect(queries).toHaveLength(new Set(queries).size);
 	} finally {
@@ -168,7 +166,7 @@ test('opens the current schema read-only without modifying the database', () => 
 				),
 			);
 			existing.exec(
-				'PRAGMA application_id=0x4f4d4e49; PRAGMA user_version=1;',
+				'PRAGMA application_id=0x4f4d4e49; PRAGMA user_version=2;',
 			);
 		} finally {
 			existing.close();

@@ -26,7 +26,7 @@ test('indexes only completed dialogue, not response mirrors/reasoning/compacted 
 	expect(result.messages.map((message) => message.native_id)).toEqual(
 		['u1', 'a1', 'u2'],
 	);
-	expect(JSON.stringify(result)).not.toMatch(
+	expect(JSON.stringify(result.messages)).not.toMatch(
 		/hidden-secret|private-tool|Duplicate|duplicate-only/,
 	);
 });

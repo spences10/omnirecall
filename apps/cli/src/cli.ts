@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty';
 import { constants, existsSync, readFileSync } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
+import { claude_adapter } from '../../../packages/adapter-claude/src/index.ts';
 import { codex_adapter } from '../../../packages/adapter-codex/src/index.ts';
 import { pi_adapter } from '../../../packages/adapter-pi/src/index.ts';
 import {
@@ -15,6 +16,7 @@ import {
 	excerpt_chars,
 	focused_read,
 	parse_ref,
+	raw_read,
 } from '../../../packages/core/src/retrieval.ts';
 import { error_code, sync } from '../../../packages/core/src/sync.ts';
 import {
@@ -57,7 +59,7 @@ const info = defineCommand({
 		console.log(
 			args.json
 				? JSON.stringify(result)
-				: `${result.name} v${result.version}\nPreview: Pi v3 and Codex paginated dialogue; durable local archive.`,
+				: `${result.name} v${result.version}\nPreview: Pi, Claude Code and Codex session evidence; durable local archive.`,
 		);
 	},
 });
@@ -96,7 +98,7 @@ function command(name: string) {
 	return defineCommand({
 		meta: {
 			name,
-			description: `${name} archived Pi/Codex conversations (explicit roots for sync)`,
+			description: `${name} archived coding-agent sessions (explicit roots for sync)`,
 		},
 		args: {
 			json: { type: 'boolean', description: 'Machine-readable JSON' },
@@ -133,13 +135,26 @@ function command(name: string) {
 				type: 'string',
 				description: 'Explicit Pi session tree root',
 			},
+			'claude-root': {
+				type: 'string',
+				description: 'Explicit Claude transcript tree root',
+			},
+			raw: {
+				type: 'boolean',
+				description: 'Read: page through the original JSON record',
+			},
+			kind: {
+				type: 'string',
+				description:
+					'Search/recall: message, reasoning, tool_call, tool_result, summary, or operation',
+			},
 			'codex-root': {
 				type: 'string',
 				description: 'Explicit Codex JSONL tree root',
 			},
 			agent: {
 				type: 'string',
-				description: 'Transcript source: pi or codex',
+				description: 'Transcript source: pi, codex, or claude',
 			},
 			source: {
 				type: 'string',
@@ -248,13 +263,30 @@ function command(name: string) {
 				if (
 					agent !== undefined &&
 					agent !== 'pi' &&
-					agent !== 'codex'
+					agent !== 'codex' &&
+					agent !== 'claude'
 				)
 					throw new InputError(
 						'arguments',
-						'--agent must be pi or codex',
+						'--agent must be pi, codex, or claude',
+					);
+				if (args.raw && name !== 'read')
+					throw new InputError(
+						'arguments',
+						'--raw applies to read only',
+					);
+				if (args.raw && args.context !== undefined)
+					throw new InputError(
+						'arguments',
+						'--raw does not accept context',
+					);
+				if (args.kind && !['search', 'recall'].includes(name))
+					throw new InputError(
+						'arguments',
+						'--kind applies to search/recall only',
 					);
 				const options: QueryOptions = {
+					kind: optional(args.kind),
 					agent,
 					source: optional(args.source),
 					project: optional(args.project),
@@ -285,6 +317,8 @@ function command(name: string) {
 						'Date filters apply to search/recall only',
 					);
 				const sources: Source[] = [];
+				if (args['claude-root'])
+					sources.push(source_config('claude', args['claude-root']));
 				if (args['pi-root'])
 					sources.push(source_config('pi', args['pi-root']));
 				if (args['codex-root'])
@@ -312,7 +346,7 @@ function command(name: string) {
 				if (name === 'sync' && !selected.length)
 					throw new InputError(
 						'arguments',
-						'sync requires an explicit --pi-root or --codex-root matching the source filters',
+						'sync requires an explicit --pi-root, --codex-root, or --claude-root matching the source filters',
 					);
 				if (
 					name === 'sync' &&
@@ -342,6 +376,7 @@ function command(name: string) {
 					result = await sync(archive!, selected, [
 						pi_adapter,
 						codex_adapter,
+						claude_adapter,
 					]);
 					if (result.status === 'partial') process.exitCode = 2;
 					else if (result.status === 'error') process.exitCode = 1;
@@ -354,13 +389,15 @@ function command(name: string) {
 					result = {
 						status: 'ok',
 						format: 'compact',
-						...focused_read(
-							archive,
-							query!,
-							options.context,
-							char_offset,
-							chars,
-						),
+						...(args.raw || query!.startsWith('r1.')
+							? raw_read(archive, query!, char_offset, chars)
+							: focused_read(
+									archive,
+									query!,
+									options.context,
+									char_offset,
+									chars,
+								)),
 						offset: 0,
 						returned_count: 1,
 						has_more: false,

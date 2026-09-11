@@ -178,7 +178,7 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 		expect(JSON.parse(partial.stdout).issues[0].code).toBe('missing');
 		for (const args of [
 			['--limit', '0'],
-			['--agent', 'claude'],
+			['--agent', 'invalid'],
 			['--after', 'invalid'],
 			['--max-bytes', '1'],
 		]) {
@@ -351,7 +351,9 @@ describe('built CLI', () => {
 	test('explains preview support in human-readable output', () => {
 		const result = run_cli(['info']);
 		expect(result.status).toBe(0);
-		expect(result.stdout).toContain('Pi v3 and Codex paginated');
+		expect(result.stdout).toContain(
+			'Pi, Claude Code and Codex session evidence',
+		);
 	});
 
 	test('rejects commands that are not implemented', () => {
@@ -411,6 +413,100 @@ test('creates omnirecall.db in the platform data directory', () => {
 			0,
 		);
 		expect(JSON.parse(recalled.stdout).returned_count).toBe(1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('Claude tool search and raw-record continuation work through the built CLI', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omni-claude-cli-'));
+	try {
+		const db = join(root, 'archive.db');
+		writeFileSync(
+			join(root, 'session.jsonl'),
+			jsonl([
+				{
+					type: 'assistant',
+					uuid: 'a',
+					sessionId: 's',
+					timestamp: '2026-09-01T00:00:00Z',
+					message: {
+						role: 'assistant',
+						content: [
+							{
+								type: 'tool_use',
+								id: 'c',
+								name: 'Bash',
+								input: { command: 'check' },
+							},
+						],
+					},
+				},
+				{
+					type: 'user',
+					uuid: 'u',
+					sessionId: 's',
+					timestamp: '2026-09-01T00:00:01Z',
+					message: {
+						role: 'user',
+						content: [
+							{
+								type: 'tool_result',
+								tool_use_id: 'c',
+								content: 'tool_unique_failure',
+								is_error: true,
+							},
+						],
+					},
+				},
+			]),
+		);
+		const imported = run_cli([
+			'sync',
+			'--claude-root',
+			root,
+			'--db',
+			db,
+			'--json',
+		]);
+		expect(imported.status, imported.stdout + imported.stderr).toBe(
+			0,
+		);
+		const search = run_cli([
+			'search',
+			'tool_unique_failure',
+			'--kind',
+			'tool_result',
+			'--db',
+			db,
+			'--json',
+		]);
+		const hit = JSON.parse(search.stdout).results[0];
+		expect(hit.kind).toBe('tool_result');
+		const read = run_cli([
+			'read',
+			hit.ref,
+			'--raw',
+			'--chars',
+			'25',
+			'--db',
+			db,
+			'--json',
+		]);
+		const first = JSON.parse(read.stdout).results[0];
+		expect(first.next_char_offset).toBe(25);
+		const next = run_cli([
+			'read',
+			first.record_ref,
+			'--char-offset',
+			'25',
+			'--chars',
+			'25',
+			'--db',
+			db,
+			'--json',
+		]);
+		expect(JSON.parse(next.stdout).results[0].char_offset).toBe(25);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

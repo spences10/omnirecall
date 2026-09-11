@@ -23,7 +23,7 @@ function store(contents: string[], revision = 'initial') {
 		title: 'Migration decision',
 		parent_session: null,
 		timestamp,
-		omitted_records: 0,
+		unindexed_records: 0,
 		messages: contents.map((content, index) => ({
 			native_id: `message-${index}`,
 			parent_id: index ? `message-${index - 1}` : null,

@@ -17,7 +17,7 @@ export function message_ref(message: {
 }
 
 export function parse_ref(ref: string) {
-	const match = /^m1\.([a-f0-9]{64})\.([A-Za-z0-9_-]+)$/.exec(ref);
+	const match = /^[mr]1\.([a-f0-9]{64})\.([A-Za-z0-9_-]+)$/.exec(ref);
 	if (match && ref.length <= 22000) {
 		const native_id = Buffer.from(match[2]!, 'base64url').toString(
 			'utf8',
@@ -26,7 +26,7 @@ export function parse_ref(ref: string) {
 		if (
 			native_id.trim() &&
 			native_id.length <= 4096 &&
-			message_ref(identity) === ref
+			message_ref(identity).slice(2) === ref.slice(2)
 		)
 			return identity;
 	}
@@ -48,6 +48,9 @@ function compact_message(
 	return {
 		ref: message_ref(message),
 		role: message.role,
+		kind: message.kind ?? 'message',
+		state: message.state ?? (message.active ? 'active' : 'inactive'),
+		representation: message.representation ?? 'primary',
 		timestamp: message.timestamp,
 		active: Boolean(message.active),
 		content,
@@ -69,6 +72,9 @@ function attribution(message: LocatedMessage) {
 		project_truncated: message.project.length > 200,
 		timestamp: message.timestamp,
 		role: message.role,
+		kind: message.kind ?? 'message',
+		state: message.state ?? (message.active ? 'active' : 'inactive'),
+		representation: message.representation ?? 'primary',
 		active: Boolean(message.active),
 		current_revision: Boolean(message.current_revision),
 		source_status: message.source_status,
@@ -150,6 +156,20 @@ export function focused_read(
 				title: match.title,
 				title_truncated: false,
 				source_path: match.source_path,
+				record_key: match.record_key,
+				record_ref: match.record_key
+					? record_ref(match.revision_id, match.record_key)
+					: null,
+				json_pointer: match.json_pointer,
+				links: match.record_key
+					? archive
+							.record_links(match.revision_id, match.record_key)
+							.slice(0, 20)
+					: [],
+				links_truncated: match.record_key
+					? archive.record_links(match.revision_id, match.record_key)
+							.length > 20
+					: false,
 				before: before.map(message_ref),
 				after: after.map(message_ref),
 				previous_ref:
@@ -169,4 +189,59 @@ export function focused_read(
 			...after.map((message) => compact_message(message, 0, chars)),
 		],
 	};
+}
+
+export function raw_read(
+	archive: Archive,
+	ref: string,
+	offset: number,
+	chars: number,
+) {
+	const { revision_id, native_id } = parse_ref(ref);
+	const row = archive.raw_record(
+		revision_id,
+		native_id,
+		offset,
+		chars,
+		ref.startsWith('r1.'),
+	);
+	if (!row)
+		throw new InputError(
+			'not_found',
+			'Original record is not available for this reference',
+		);
+	if (offset > row.content_length)
+		throw new InputError(
+			'arguments',
+			'Character offset exceeds record length',
+		);
+	const next = offset + Array.from(row.content).length;
+	return {
+		results: [
+			{
+				ref,
+				revision_id,
+				record_key: row.record_key,
+				record_ref: record_ref(revision_id, row.record_key),
+				previous_ref:
+					row.previous_key === null
+						? null
+						: record_ref(revision_id, row.previous_key),
+				next_ref:
+					row.next_key === null
+						? null
+						: record_ref(revision_id, row.next_key),
+				native_type: row.native_type,
+				content: row.content,
+				char_offset: offset,
+				content_truncated: next < row.content_length,
+				next_char_offset: next < row.content_length ? next : null,
+				format: 'raw_json_excerpt',
+			},
+		],
+	};
+}
+
+export function record_ref(revision_id: string, key: string) {
+	return `r1.${revision_id}.${Buffer.from(key).toString('base64url')}`;
 }

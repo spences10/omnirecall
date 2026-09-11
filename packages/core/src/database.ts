@@ -31,6 +31,7 @@ type SessionOptions = SourceFilter &
 		include_history?: boolean;
 	};
 type SearchOptions = SessionOptions & {
+	kind?: string;
 	after?: string;
 	before?: string;
 };
@@ -63,7 +64,7 @@ type Provenance = Pick<
 	title: string | null;
 	parent_session: string | null;
 	indexed_at: string;
-	omitted_records: number;
+	unindexed_records: number;
 };
 export type SessionRecord = Provenance & {
 	native_id: string;
@@ -111,6 +112,7 @@ function session_parameters(options: SessionOptions) {
 export class Archive {
 	#db: DatabaseSync;
 	#statements = new Map<string, StatementSync>();
+	#in_transaction = false;
 
 	constructor(path: string, read_only = false) {
 		const existed = path !== ':memory:' && existsSync(path);
@@ -133,13 +135,13 @@ export class Archive {
 					this.#db.exec(`
 					${schema}
 					PRAGMA application_id=${application_id};
-					PRAGMA user_version=1;
+					PRAGMA user_version=2;
 				`),
 				);
 			}
 			if (
 				this.#statement('PRAGMA user_version').get()?.user_version !==
-				1
+				2
 			)
 				throw new InputError(
 					'database',
@@ -162,7 +164,9 @@ export class Archive {
 	}
 
 	#transaction<T>(fn: () => T): T {
+		if (this.#in_transaction) return fn();
 		this.#db.exec('BEGIN IMMEDIATE');
+		this.#in_transaction = true;
 		try {
 			const result = fn();
 			this.#db.exec('COMMIT');
@@ -170,7 +174,13 @@ export class Archive {
 		} catch (error) {
 			this.#db.exec('ROLLBACK');
 			throw error;
+		} finally {
+			this.#in_transaction = false;
 		}
+	}
+
+	atomic<T>(fn: () => T): T {
+		return this.#transaction(fn);
 	}
 
 	close() {
@@ -222,12 +232,19 @@ export class Archive {
 		source: Source,
 		path: string,
 		transcript: Transcript,
-		snapshot: { hash: string; byte_offset: number; partial: boolean },
-		refresh_title = false,
+		snapshot: {
+			hash: string;
+			byte_offset: number;
+			partial: boolean;
+			parser_version?: number;
+			inputs?: import('./types.ts').ImportInput[];
+		},
+		_refresh_title = false,
 	) {
-		const session_id = `${source.source_id}:${encodeURIComponent(transcript.native_id)}`;
+		const version = snapshot.parser_version ?? parser_version;
+		const session_id = `${source.source_id}:${encodeURIComponent(transcript.session_key ?? transcript.native_id)}`;
 		const revision_id = digest(
-			`${session_id}:${parser_version}:${snapshot.hash}`,
+			`${session_id}:${version}:${snapshot.hash}:${JSON.stringify([transcript.title, transcript.project])}`,
 		);
 		const indexed_at = new Date().toISOString();
 		return this.#transaction(() => {
@@ -245,38 +262,82 @@ export class Archive {
 					revision_id,
 					session_id,
 					hash: snapshot.hash,
-					parser_version,
+					parser_version: version,
 					project: transcript.project,
 					title: transcript.title,
 					parent_session: transcript.parent_session,
 					timestamp: transcript.timestamp,
 					indexed_at,
-					omitted_records: transcript.omitted_records,
+					unindexed_records: transcript.unindexed_records,
 					recorded_path: path,
 				});
+
+				for (const record of transcript.records ?? [])
+					this.#statement(
+						'INSERT INTO records VALUES(?,?,?,?,?,?,?,?)',
+					).run(
+						revision_id,
+						record.key,
+						record.native_id,
+						record.native_type,
+						record.timestamp,
+						record.source_order,
+						record.raw_json,
+						record.input_path ?? path,
+					);
+				for (const link of transcript.links ?? [])
+					this.#statement(
+						'INSERT OR IGNORE INTO links VALUES(?,?,?,?,?)',
+					).run(
+						revision_id,
+						link.record_key,
+						link.kind,
+						link.namespace,
+						link.target,
+					);
 				const insert_message = this.#statement(sql.insert_message);
-				for (const message of transcript.messages)
+				for (const message of [
+					...transcript.messages,
+					...(transcript.parts ?? []),
+				])
 					insert_message.run({
 						...message,
+						kind: message.kind ?? 'message',
+						representation: message.representation ?? 'primary',
+						state:
+							message.state ??
+							(message.active ? 'active' : 'inactive'),
+						record_key: message.record_key ?? null,
+						json_pointer: message.json_pointer ?? '',
 						revision_id,
 						active: Number(message.active),
 					});
 			}
-			if (refresh_title)
-				this.#statement(sql.refresh_title).run({
-					title: transcript.title,
+
+			for (const input of snapshot.inputs ?? [
+				{ path, ...snapshot },
+			]) {
+				this.#statement(sql.store_path).run({
+					source_id: source.source_id,
+					path: input.path,
+					session_id,
 					revision_id,
+					status: input.partial ? 'partial' : 'available',
+					byte_offset: input.byte_offset,
+					parser_version: version,
+					checked_at: indexed_at,
 				});
-			this.#statement(sql.store_path).run({
-				source_id: source.source_id,
-				path,
-				session_id,
-				revision_id,
-				status: snapshot.partial ? 'partial' : 'available',
-				byte_offset: snapshot.byte_offset,
-				parser_version,
-				checked_at: indexed_at,
-			});
+
+				this.#statement(
+					'INSERT OR IGNORE INTO revision_inputs VALUES(?,?,?,?,?)',
+				).run(
+					revision_id,
+					source.source_id,
+					input.path,
+					input.hash,
+					input.byte_offset,
+				);
+			}
 			return { session_id, revision_id, added: !known };
 		});
 	}
@@ -298,10 +359,23 @@ export class Archive {
 		}) as SourceSummary[];
 	}
 
-	sessions(options: SessionOptions): SessionRecord[] {
-		return this.#statement(sql.sessions).all(
+	sessions(
+		options: SessionOptions,
+	): (SessionRecord & { first_record_ref: string | null })[] {
+		const rows = this.#statement(sql.sessions).all(
 			session_parameters(options),
 		) as SessionRecord[];
+		return rows.map((row) => {
+			const first = this.#statement(
+				'SELECT record_key FROM records WHERE revision_id=? ORDER BY source_order LIMIT 1',
+			).get(row.revision_id);
+			return {
+				...row,
+				first_record_ref: first
+					? `r1.${row.revision_id}.${Buffer.from(String(first.record_key)).toString('base64url')}`
+					: null,
+			};
+		});
 	}
 
 	search(query: string, options: SearchOptions): SearchMatch[] {
@@ -314,6 +388,7 @@ export class Archive {
 		return this.#statement(sql.search).all({
 			...session_parameters(options),
 			query: expression,
+			kind: options.kind ?? null,
 			after: options.after ?? null,
 			before: options.before ?? null,
 		}) as SearchMatch[];
@@ -357,6 +432,36 @@ export class Archive {
 		}) as (LocatedMessage & { content_length: number }) | undefined;
 	}
 
+	raw_record(
+		revision_id: string,
+		native_id: string,
+		offset: number,
+		chars: number,
+		direct = false,
+	) {
+		return this.#statement(`SELECT substr(r.raw_json, $offset + 1, $chars) AS content,
+    length(r.raw_json) AS content_length, r.record_key, r.native_type,
+    (SELECT record_key FROM records WHERE revision_id=r.revision_id AND source_order<r.source_order ORDER BY source_order DESC LIMIT 1) AS previous_key,
+    (SELECT record_key FROM records WHERE revision_id=r.revision_id AND source_order>r.source_order ORDER BY source_order LIMIT 1) AS next_key
+    FROM records r WHERE r.revision_id=$revision_id AND r.record_key = ${direct ? '$native_id' : '(SELECT record_key FROM parts WHERE revision_id=$revision_id AND native_id=$native_id)'}`).get(
+			{ revision_id, native_id, offset, chars },
+		) as
+			| {
+					content: string;
+					content_length: number;
+					record_key: string;
+					native_type: string | null;
+					previous_key: string | null;
+					next_key: string | null;
+			  }
+			| undefined;
+	}
+	record_links(revision_id: string, record_key: string) {
+		return this.#statement(
+			'SELECT kind, namespace, target FROM links WHERE revision_id=? AND record_key=? ORDER BY kind,namespace,target LIMIT 21',
+		).all(revision_id, record_key);
+	}
+
 	context(
 		revision_id: string,
 		native_id: string,
@@ -379,6 +484,7 @@ export class Archive {
 			const children = this.#statement(sql.children).all({
 				revision_id,
 				parent_id: cursor.native_id,
+				kind: cursor.kind ?? 'message',
 				active: match.active,
 			}) as ArchivedMessage[];
 			if (children.length !== 1) {

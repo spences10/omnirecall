@@ -1,0 +1,5 @@
+{
+	"name": "@omnirecall/adapter-shared",
+	"private": true,
+	"type": "module"
+}

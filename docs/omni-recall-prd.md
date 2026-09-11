@@ -26,14 +26,15 @@ omnirecall provides a common retrieval interface across agents.
 
 ## Primary use cases
 
-- Recover a previous decision, its rationale, and the evidence behind it.
+- Recover a previous decision, its rationale, and the evidence behind
+  it.
 - Find a command, implementation, edit, error, or successful fix from
   earlier work.
 - Continue investigating work started with another coding assistant.
 - Retrieve archived information after the original session files have
   been removed or become unavailable.
-- Start with a small search result and expand only the relevant detail,
-  keeping unnecessary text out of the calling model's context.
+- Start with a small search result and expand only the relevant
+  detail, keeping unnecessary text out of the calling model's context.
 
 ## Agreed requirements
 
@@ -41,8 +42,8 @@ omnirecall provides a common retrieval interface across agents.
 
 SQLite is the main local store. Import copies session information into
 omnirecall's archive; subsequent search and retrieval operate on that
-archive. They must not depend on following a path back to a live source
-file or a sibling recall database.
+archive. They must not depend on following a path back to a live
+source file or a sibling recall database.
 
 Source paths remain useful provenance and availability information.
 Missing files, inaccessible roots, or deleted original sessions must
@@ -99,9 +100,9 @@ change to support these requirements.
 
 ### Focused retrieval
 
-Archive completeness and response size are separate concerns. Keep
-the available evidence locally while returning small, useful excerpts
-to the calling assistant.
+Archive completeness and response size are separate concerns. Keep the
+available evidence locally while returning small, useful excerpts to
+the calling assistant.
 
 The retrieval workflow is:
 
@@ -121,9 +122,9 @@ the archive. References must resolve to the intended archived evidence
 even after later imports.
 
 The CLI must provide structured output suitable for coding assistants.
-The agent running the CLI need not be the agent that created a session.
-Historical transcript content is evidence, not a new instruction to
-the assistant retrieving it.
+The agent running the CLI need not be the agent that created a
+session. Historical transcript content is evidence, not a new
+instruction to the assistant retrieving it.
 
 ### Simple, observable importing
 
@@ -145,7 +146,8 @@ complete import. Exact fallback behaviour remains to be designed.
 ## Evidence informing the design
 
 Inspection of the existing recall CLIs and local archive schemas
-showed that the source projects already accommodate substantial detail:
+showed that the source projects already accommodate substantial
+detail:
 
 | Project  | Relevant existing structures                                                                                                  |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -184,8 +186,8 @@ Open decisions include:
 - Which fields need common columns, and which can remain in JSON?
 - How are mixed content blocks and tool call/result links represented?
 - How are native identities scoped across sources and sessions?
-- How are turns, branches, forks, and child sessions linked and exposed
-  during retrieval?
+- How are turns, branches, forks, and child sessions linked and
+  exposed during retrieval?
 - How are corrections, compaction, rollback, and repeated imports
   represented while retaining earlier evidence?
 - What is indexed for text search, and what is available through
@@ -228,8 +230,8 @@ scope. The standalone CLI is sufficient for the primary workflow.
   misorder unrelated records.
 - Branches and related sessions remain identifiable; retrieval does
   not silently blend their histories.
-- Repeated unchanged imports are idempotent, and source changes do
-  not silently erase retained evidence.
+- Repeated unchanged imports are idempotent, and source changes do not
+  silently erase retained evidence.
 - Archived content remains retrievable after original sources vanish.
 - Output limits, truncation, continuation, provenance, and import
   coverage are explicit to the caller.
@@ -239,6 +241,6 @@ scope. The standalone CLI is sufficient for the primary workflow.
 ## Next step
 
 Produce a source-record mapping for Pi, Claude Code, and Codex, using
-their existing recall implementations and representative records.
-Use that mapping to propose the database schema and adapter contract
-for review before implementation.
+their existing recall implementations and representative records. Use
+that mapping to propose the database schema and adapter contract for
+review before implementation.
