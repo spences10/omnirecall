@@ -164,10 +164,10 @@ Dependency versions live in the default `catalog` in
 version ranges, not catalog references.
 
 - `apps/cli`: only publishable package; bundles core/adapters by
-  relative source imports, without runtime workspace dependencies or
-  SQL assets.
+  relative source imports, without runtime workspace dependencies.
+  Builds also copy the archive schema to `dist/schema.sql`.
 - `packages/core`: private SQLite, sync/checkpoints, retrieval and
-  output.
+  output. The database schema lives in `src/schema.sql`.
 - `packages/adapter-pi`, `packages/adapter-codex`: private format
   adapters.
 - Tests are colocated `*.test.ts`; fixtures are synthetic.

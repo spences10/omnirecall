@@ -248,3 +248,20 @@ describe('built CLI', () => {
 		expect(result.error).toBeUndefined();
 	});
 });
+
+test('build ships the SQL schema unchanged beside the executable', () => {
+	expect(
+		readFileSync(
+			new URL('../dist/schema.sql', import.meta.url),
+			'utf8',
+		),
+	).toBe(
+		readFileSync(
+			new URL(
+				'../../../packages/core/src/schema.sql',
+				import.meta.url,
+			),
+			'utf8',
+		),
+	);
+});

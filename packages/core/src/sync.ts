@@ -69,15 +69,7 @@ export async function sync(
 		} catch (error) {
 			issue(source, source.root, error);
 		}
-		const seen = new Set(files);
-		archive.transaction(() => {
-			for (const row of archive.all(
-				'SELECT path FROM paths WHERE source_id=?',
-				source.source_id,
-			))
-				if (!seen.has(String(row.path)))
-					archive.path_status(source, String(row.path), 'missing');
-		});
+		archive.reconcile_paths(source, new Set(files));
 		// Detect divergent copies before changing the selected revision. Keep only hashes between passes.
 		const candidates: {
 			path: string;

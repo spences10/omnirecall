@@ -272,7 +272,7 @@ function command(name: string) {
 					if (result.status === 'partial') process.exitCode = 2;
 					else if (result.status === 'error') process.exitCode = 1;
 				} else {
-					let rows: Record<string, unknown>[] = [];
+					let rows: object[] = [];
 					if (name === 'sources' && selected.length) {
 						for (const source of selected) {
 							let live_status = 'available';
@@ -286,10 +286,7 @@ function command(name: string) {
 							} catch (error) {
 								live_status = error_code(error);
 							}
-							const stored = archive?.get(
-								'SELECT * FROM sources WHERE source_id=?',
-								source.source_id,
-							);
+							const stored = archive?.source(source.source_id);
 							rows.push({
 								...source,
 								archive_status: stored?.status ?? 'unindexed',
@@ -305,44 +302,22 @@ function command(name: string) {
 						if (name === 'sources') rows = archive.sources(options);
 						else if (name === 'sessions')
 							rows = archive.sessions(options);
+						else if (name === 'recall')
+							rows = archive.recall(query!, options);
 						else rows = archive.search(query!, options);
 					}
 					const has_more = rows.length > options.limit;
 					rows = rows.slice(0, options.limit);
-					if (name === 'recall' && archive)
-						rows = rows.map((row) => ({
-							...row,
-							...archive!.context(
-								String(row.revision_id),
-								String(row.native_id),
-								options.context,
-							),
-						}));
-					const indexed_sessions = Number(
-						archive?.get(
-							'SELECT count(*) AS n FROM sessions t JOIN sources s USING(source_id) WHERE (? IS NULL OR s.agent=?) AND (? IS NULL OR s.source_id=?)',
-							agent ?? null,
-							agent ?? null,
-							options.source ?? null,
-							options.source ?? null,
-						)?.n ?? 0,
-					);
-					const source_statuses =
-						archive?.all(
-							'SELECT status,count(*) AS count FROM sources WHERE (? IS NULL OR agent=?) AND (? IS NULL OR source_id=?) GROUP BY status ORDER BY status',
-							agent ?? null,
-							agent ?? null,
-							options.source ?? null,
-							options.source ?? null,
-						) ?? [];
+					const coverage = archive?.coverage(options) ?? {
+						indexed_sessions: 0,
+						source_statuses: [],
+						freshness: 'last_explicit_sync',
+					};
 					result = {
-						coverage: {
-							indexed_sessions,
-							source_statuses,
-							freshness: 'last_explicit_sync',
-						},
+						coverage,
 						status:
-							!archive || (name !== 'sources' && !indexed_sessions)
+							!archive ||
+							(name !== 'sources' && !coverage.indexed_sessions)
 								? 'unindexed'
 								: rows.length
 									? 'ok'
