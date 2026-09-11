@@ -1,5 +1,9 @@
 import { basename } from 'node:path';
 import { preserve_records } from '../../adapter-shared/src/evidence.ts';
+import {
+	claude_message_schema,
+	validate_source,
+} from '../../adapter-shared/src/schemas.ts';
 import { jsonl_adapter } from '../../core/src/files.ts';
 import {
 	InputError,
@@ -53,17 +57,20 @@ export function parse_claude(
 	for (const { value: v, byte_offset } of records) {
 		if (v.type === 'summary' && typeof v.summary === 'string')
 			result.title = v.summary.slice(0, 4096);
-		if (
-			!['user', 'assistant'].includes(String(v.type)) ||
-			typeof v.uuid !== 'string'
-		)
-			continue;
-		if (seen.has(v.uuid))
+		if (!['user', 'assistant'].includes(String(v.type))) continue;
+		const validated = validate_source(
+			claude_message_schema,
+			v,
+			'Claude',
+			byte_offset,
+		);
+		const uuid = validated.uuid;
+		if (seen.has(uuid))
 			throw new InputError(
 				'unsupported',
 				'Repeated Claude message identity requires correction semantics',
 			);
-		seen.add(v.uuid);
+		seen.add(uuid);
 		const m = object(v.message);
 		const content =
 			typeof m.content === 'string'
@@ -80,7 +87,7 @@ export function parse_claude(
 					: '';
 		if (!content.trim()) continue;
 		result.messages.push({
-			native_id: v.uuid,
+			native_id: uuid,
 			parent_id:
 				typeof v.parentUuid === 'string' ? v.parentUuid : null,
 			role: String(v.type),

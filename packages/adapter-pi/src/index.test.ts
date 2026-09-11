@@ -89,3 +89,12 @@ test('uses last serialized leaf, not timestamp order, and excludes sibling branc
 			.map((message) => message.native_id),
 	).toEqual(['u1', 'branch']);
 });
+
+test('reports the byte and field for a malformed entry', () => {
+	expect(() =>
+		parse([
+			...pi_records(),
+			{ ...pi_entry('bad', 'u2', 'user', 'hello'), parentId: 17 },
+		]),
+	).toThrow(/Pi record at byte .*invalid field parentId/);
+});

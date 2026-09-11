@@ -1,5 +1,8 @@
 {
 	"name": "@omnirecall/core",
 	"private": true,
-	"type": "module"
+	"type": "module",
+	"dependencies": {
+		"valibot": "catalog:"
+	}
 }

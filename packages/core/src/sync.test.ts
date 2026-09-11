@@ -561,3 +561,40 @@ test('same-size rewrites and truncation create revisions; divergent duplicate fi
 		archive.search('surely', { ...options, include_history: true }),
 	).toHaveLength(1);
 });
+
+test('invalid adapter output preserves the selected revision and checkpoint', async () => {
+	await sync(archive, sources, adapters);
+	const checkpoint = inspection
+		.prepare(
+			'SELECT revision_id, byte_offset FROM resources WHERE path=?',
+		)
+		.get(path_for('pi'));
+	const malformed: Adapter = {
+		...pi_adapter,
+		async read(unit) {
+			const batch = await pi_adapter.read(unit);
+			batch.sessions[0]!.messages[0]!.source_order = -1;
+			return batch;
+		},
+	};
+	const result = await sync(archive, [sources[0]!], [malformed]);
+	expect(result).toMatchObject({
+		status: 'partial',
+		failures: 1,
+		operational_failures: 0,
+		revisions_added: 0,
+	});
+	expect(result.issues[0]).toMatchObject({
+		code: 'invalid',
+		message:
+			'Adapter pi output: invalid field sessions.0.messages.0.source_order',
+	});
+	expect(
+		inspection
+			.prepare(
+				'SELECT revision_id, byte_offset FROM resources WHERE path=?',
+			)
+			.get(path_for('pi')),
+	).toEqual(checkpoint);
+	expect(archive.search('migrations', options)).toHaveLength(2);
+});

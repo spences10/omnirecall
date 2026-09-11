@@ -1,4 +1,10 @@
 import { preserve_records } from '../../adapter-shared/src/evidence.ts';
+import {
+	pi_entry_schema,
+	pi_header_schema,
+	pi_message_schema,
+	validate_source,
+} from '../../adapter-shared/src/schemas.ts';
 import { jsonl_adapter } from '../../core/src/files.ts';
 import {
 	date,
@@ -19,6 +25,12 @@ export function parse_pi(records: RecordLine[]): Transcript {
 			'unsupported',
 			'Only Pi session version 3 trees are supported',
 		);
+	validate_source(
+		pi_header_schema,
+		header,
+		'Pi',
+		records[0]!.byte_offset,
+	);
 	const result: Transcript = {
 		native_id: text(header.id),
 		project: text(header.cwd),
@@ -32,6 +44,7 @@ export function parse_pi(records: RecordLine[]): Transcript {
 	const nearest_message = new Map<string, string | null>();
 	let leaf: string | null = null;
 	for (const { value: entry, byte_offset } of records.slice(1)) {
+		validate_source(pi_entry_schema, entry, 'Pi', byte_offset);
 		const id = text(entry.id);
 		const parent_id =
 			entry.parentId === null ? null : text(entry.parentId);
@@ -53,6 +66,12 @@ export function parse_pi(records: RecordLine[]): Transcript {
 		if (entry.type === 'message') {
 			const message = object(entry.message);
 			if (message.role === 'user' || message.role === 'assistant') {
+				validate_source(
+					pi_message_schema,
+					message,
+					'Pi message',
+					byte_offset,
+				);
 				const content = dialogue(message.content, [
 					'thinking',
 					'image',

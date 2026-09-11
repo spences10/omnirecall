@@ -7,6 +7,11 @@ import {
 	type ImportUnit,
 	type Source,
 } from './types.ts';
+import {
+	import_schema,
+	metadata_schema,
+	validate,
+} from './validation.ts';
 export function error_code(error: unknown): string {
 	const code = (error as NodeJS.ErrnoException)?.code;
 	if (error instanceof InputError) return error.code;
@@ -77,7 +82,11 @@ export async function sync(
 			issue(source, source.root, e);
 		}
 		const read = async (unit: ImportUnit) => {
-			const batch = await adapter.read(unit);
+			const batch = validate(
+				import_schema,
+				await adapter.read(unit),
+				`Adapter ${adapter.agent} output`,
+			);
 			if (!batch.inputs.length || !batch.sessions.length)
 				throw new InputError(
 					'unsupported',
@@ -100,8 +109,11 @@ export async function sync(
 						);
 				}
 			for (const session of batch.sessions)
-				session.title =
-					titles.get(session.native_id) ?? session.title;
+				session.title = validate(
+					metadata_schema,
+					titles.get(session.native_id) ?? session.title,
+					`Adapter ${adapter.agent} title`,
+				);
 			return batch;
 		};
 		const serialized = (value: unknown) =>

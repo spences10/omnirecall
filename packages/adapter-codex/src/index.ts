@@ -2,6 +2,13 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { preserve_records } from '../../adapter-shared/src/evidence.ts';
 import {
+	codex_entry_schema,
+	codex_header_schema,
+	codex_item_schema,
+	codex_title_schema,
+	validate_source,
+} from '../../adapter-shared/src/schemas.ts';
+import {
 	discover_jsonl,
 	jsonl_adapter,
 	read_snapshot,
@@ -31,6 +38,12 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			meta.history_mode === 'legacy' ? 'legacy' : 'unsupported',
 			'Only Codex history_mode=paginated is supported',
 		);
+	validate_source(
+		codex_header_schema,
+		header,
+		'Codex',
+		records[0]!.byte_offset,
+	);
 	const result: Transcript = {
 		native_id: text(meta.id),
 		project: text(meta.cwd),
@@ -55,6 +68,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		if (!previous) turns.push({ id, active: true });
 	}
 	for (const { value: entry, byte_offset } of records.slice(1)) {
+		validate_source(codex_entry_schema, entry, 'Codex', byte_offset);
 		const timestamp = date(entry.timestamp);
 		if (entry.ordinal !== undefined) {
 			if (
@@ -181,6 +195,12 @@ export function parse_codex(records: RecordLine[]): Transcript {
 					'Dialogue without a turn ID',
 				);
 			ensure_turn(turn_id);
+			validate_source(
+				codex_item_schema,
+				item,
+				'Codex completed item',
+				byte_offset,
+			);
 			const id = text(item.id);
 			const content = dialogue(
 				item.content,
@@ -262,7 +282,13 @@ export async function session_titles(
 			'partial',
 			'Codex title index has an incomplete record',
 		);
-	for (const { value } of snapshot.records) {
+	for (const { value, byte_offset } of snapshot.records) {
+		validate_source(
+			codex_title_schema,
+			value,
+			'Codex title',
+			byte_offset,
+		);
 		const id = text(value.id);
 		const timestamp = date(value.updated_at);
 		if (typeof value.thread_name !== 'string')

@@ -176,6 +176,9 @@ catalogs:
     typescript:
       specifier: ^7.0.0
       version: 7.0.2
+    valibot:
+      specifier: ^1.5.0
+      version: 1.5.0
     vite-plus:
       specifier: 0.3.1
       version: 0.3.1
@@ -215,9 +218,17 @@ importers:
 
   packages/adapter-pi: {}
 
-  packages/adapter-shared: {}
+  packages/adapter-shared:
+    dependencies:
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@7.0.2)
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@7.0.2)
 
 packages:
 
@@ -1451,6 +1462,14 @@ packages:
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
+  valibot@1.5.0:
+    resolution: {integrity: sha512-nil6AkP2TChWL43Z5uJ6GTxX01CUA+g8LWUM+N/rB9NBbkUMaUsi9PUNzlUPgoKASgmx9f7eGOYpJ04/fSa6FQ==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   vite-plus@0.3.1:
     resolution: {integrity: sha512-U8KZ3c3mbX0qLfigx9rW2W9J73w9wjdf4s/s91H77ff5afqSYEdZd8Or41Jl99kD42a+UCL3LFXzb5b+bIBCpQ==}
     engines: {node: ^20.19.0 || ^22.18.0 || >=24.11.0}
@@ -2521,6 +2540,10 @@ snapshots:
       '@typescript/typescript-win32-x64': 7.0.2
 
   undici-types@7.18.2: {}
+
+  valibot@1.5.0(typescript@7.0.2):
+    optionalDependencies:
+      typescript: 7.0.2
 
   vite-plus@0.3.1(@types/node@24.13.3)(typescript@7.0.2)(yaml@2.9.0):
     dependencies:

@@ -115,3 +115,16 @@ test('rejects reversed ordinal ordering', () => {
 		]),
 	).toThrow('ordinals');
 });
+
+test('reports the byte and field for a malformed completed item', () => {
+	expect(() =>
+		parse([
+			...codex_records(),
+			codex_entry('event_msg', {
+				type: 'item_completed',
+				turn_id: 'turn-1',
+				item: { type: 'UserMessage', id: 17, content: 'hello' },
+			}),
+		]),
+	).toThrow(/Codex completed item record at byte .*invalid field id/);
+});
