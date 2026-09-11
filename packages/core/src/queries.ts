@@ -1,7 +1,7 @@
-const message_columns = `
+const message_columns = (start = '1', count = '4000') => `
 	m.rowid, m.revision_id, m.native_id, m.parent_id, m.role,
-	substr(m.content, 1, 4000) AS content,
-	length(m.content) > 4000 AS content_truncated,
+	substr(m.content, ${start}, ${count}) AS content,
+	length(m.content) >= (${start}) + (${count}) AS content_truncated,
 	m.timestamp, m.source_order, m.active, m.turn_id
 `;
 
@@ -151,13 +151,14 @@ export const sql = {
 	`,
 	search: `
 		SELECT
-			${message_columns},
+			${message_columns()},
 			t.session_id, s.source_id, s.agent, s.root,
 			s.status AS source_status, s.checked_at AS source_checked_at,
 			r.project, r.title, r.parent_session, r.indexed_at, r.omitted_records,
 			(r.revision_id = t.current_revision) AS current_revision,
 			${provenance_columns},
 			substr(snippet(messages_fts, 0, '', '', '…', 32), 1, 4000) AS snippet,
+			max(0, instr(m.content, snippet(messages_fts, 0, '', '', '', 32)) - 1) AS char_offset,
 			bm25(messages_fts) AS relevance
 		FROM messages_fts
 		JOIN messages m ON m.rowid = messages_fts.rowid
@@ -174,13 +175,28 @@ export const sql = {
 			r.revision_id, m.source_order, m.native_id
 		LIMIT $limit OFFSET $offset
 	`,
+	read_message: `
+		SELECT ${message_columns('$char_offset + 1', '$chars')},
+			length(m.content) AS content_length,
+			t.session_id, s.source_id, s.agent, s.root,
+			s.status AS source_status, s.checked_at AS source_checked_at,
+			r.project, r.title, r.parent_session, r.indexed_at, r.omitted_records,
+			(r.revision_id = t.current_revision) AS current_revision,
+			${provenance_columns}
+		FROM messages m
+		JOIN revisions r USING (revision_id)
+		JOIN sessions t ON t.session_id = r.session_id
+		JOIN sources s USING (source_id)
+		${provenance_join}
+		WHERE m.revision_id = $revision_id AND m.native_id = $native_id
+	`,
 	message: `
-		SELECT ${message_columns}
+		SELECT ${message_columns()}
 		FROM messages m
 		WHERE m.revision_id = $revision_id AND m.native_id = $native_id
 	`,
 	children: `
-		SELECT ${message_columns}
+		SELECT ${message_columns()}
 		FROM messages m
 		WHERE m.revision_id = $revision_id
 			AND m.parent_id = $parent_id AND m.active = $active

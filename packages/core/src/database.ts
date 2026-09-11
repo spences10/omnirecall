@@ -79,11 +79,12 @@ export type ArchivedMessage = Omit<Message, 'active'> & {
 	active: 0 | 1;
 	content_truncated: 0 | 1;
 };
-export type SearchMatch = ArchivedMessage &
-	Provenance & {
-		snippet: string;
-		relevance: number;
-	};
+export type LocatedMessage = ArchivedMessage & Provenance;
+export type SearchMatch = LocatedMessage & {
+	snippet: string;
+	char_offset: number;
+	relevance: number;
+};
 export type MessageContext = {
 	before: ArchivedMessage[];
 	after: ArchivedMessage[];
@@ -340,6 +341,20 @@ export class Archive {
 			revision_id,
 			native_id,
 		}) as ArchivedMessage | undefined;
+	}
+
+	read_message(
+		revision_id: string,
+		native_id: string,
+		char_offset: number,
+		chars: number,
+	) {
+		return this.#statement(sql.read_message).get({
+			revision_id,
+			native_id,
+			char_offset,
+			chars,
+		}) as (LocatedMessage & { content_length: number }) | undefined;
 	}
 
 	context(

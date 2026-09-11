@@ -1,5 +1,4 @@
 import { defineCommand } from 'citty';
-import { database_path } from './paths.ts';
 import { constants, existsSync, readFileSync } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { codex_adapter } from '../../../packages/adapter-codex/src/index.ts';
@@ -10,11 +9,19 @@ import {
 } from '../../../packages/core/src/database.ts';
 import { source_config } from '../../../packages/core/src/files.ts';
 import { bounded_json } from '../../../packages/core/src/output.ts';
+import {
+	compact_recall,
+	compact_search,
+	excerpt_chars,
+	focused_read,
+	parse_ref,
+} from '../../../packages/core/src/retrieval.ts';
 import { error_code, sync } from '../../../packages/core/src/sync.ts';
 import {
 	InputError,
 	type Source,
 } from '../../../packages/core/src/types.ts';
+import { database_path } from './paths.ts';
 
 const package_metadata = JSON.parse(
 	readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -25,6 +32,7 @@ const capabilities = [
 	'search',
 	'recall',
 	'sessions',
+	'read',
 ];
 const info = defineCommand({
 	meta: {
@@ -92,10 +100,30 @@ function command(name: string) {
 		},
 		args: {
 			json: { type: 'boolean', description: 'Machine-readable JSON' },
+			full: {
+				type: 'boolean',
+				description: 'Search: return detailed schema v1 output',
+			},
+			compact: {
+				type: 'boolean',
+				description:
+					'Search/recall: compact schema v2 output with shared context',
+			},
+			'char-offset': {
+				type: 'string',
+				description:
+					'Read: Unicode character offset within the selected message',
+			},
+			chars: {
+				type: 'string',
+				description:
+					'Read: characters per message, 1–2000 (default 1200)',
+			},
 			query: {
 				type: 'positional',
 				required: false,
-				description: 'Plain-text query (ANDed words)',
+				description:
+					'Plain-text query, or exact message ref for read',
 			},
 			db: {
 				type: 'string',
@@ -140,7 +168,8 @@ function command(name: string) {
 			},
 			limit: {
 				type: 'string',
-				description: 'Maximum results, 1–100 (default 10)',
+				description:
+					'Maximum results, 1–100 (compact default 5; detailed 10)',
 			},
 			offset: {
 				type: 'string',
@@ -148,18 +177,73 @@ function command(name: string) {
 			},
 			context: {
 				type: 'string',
-				description: 'Recall messages per side, 0–10 (default 2)',
+				description:
+					'Recall/read messages per side, 0–10 (compact default 1; detailed 2)',
 			},
 			'max-bytes': {
 				type: 'string',
-				description: 'JSON budget, 1024–1048576 (default 65536)',
+				description:
+					'JSON budget, 1024–1048576 (compact default 8192; detailed 65536)',
 			},
 		},
 		async run({ args }) {
 			let archive: Archive | undefined;
-			let max_bytes = 65536;
+			const compact =
+				name === 'read' ||
+				(name === 'search' && !args.full) ||
+				(name === 'recall' && Boolean(args.compact));
+			const schema_version = compact ? 2 : 1;
+			let max_bytes = compact ? 8192 : 65536;
 			try {
-				max_bytes = integer(args['max-bytes'], 65536, 1024, 1048576);
+				max_bytes = integer(
+					args['max-bytes'],
+					max_bytes,
+					1024,
+					1048576,
+				);
+				if (
+					(args.full && name !== 'search') ||
+					(args.compact && !['search', 'recall'].includes(name)) ||
+					(args.full && args.compact)
+				)
+					throw new InputError(
+						'arguments',
+						'--full applies to search; --compact applies to search/recall; choose one',
+					);
+				if (
+					name !== 'read' &&
+					(args['char-offset'] !== undefined ||
+						args.chars !== undefined)
+				)
+					throw new InputError(
+						'arguments',
+						'--char-offset and --chars apply to read only',
+					);
+				if (
+					name === 'read' &&
+					[
+						'agent',
+						'source',
+						'project',
+						'session',
+						'include-history',
+						'limit',
+						'offset',
+					].some(
+						(key) => args[key] !== undefined && args[key] !== false,
+					)
+				)
+					throw new InputError(
+						'arguments',
+						'read uses an exact archived reference; filters and result pagination do not apply',
+					);
+				const char_offset = integer(
+					args['char-offset'],
+					0,
+					0,
+					67108864,
+				);
+				const chars = integer(args.chars, excerpt_chars, 1, 2000);
 				const agent = optional(args.agent);
 				if (
 					agent !== undefined &&
@@ -178,9 +262,9 @@ function command(name: string) {
 					after: date_filter(args.after),
 					before: date_filter(args.before),
 					include_history: Boolean(args['include-history']),
-					limit: integer(args.limit, 10, 1, 100),
+					limit: integer(args.limit, compact ? 5 : 10, 1, 100),
 					offset: integer(args.offset, 0, 0, 1000000),
-					context: integer(args.context, 2, 0, 10),
+					context: integer(args.context, compact ? 1 : 2, 0, 10),
 				};
 				if (
 					options.after &&
@@ -241,6 +325,7 @@ function command(name: string) {
 						'sync operates on whole explicit roots, not project/session/history filters',
 					);
 				const query = optional(args.query)?.trim();
+				if (name === 'read') parse_ref(query ?? '');
 				if (
 					(name === 'search' || name === 'recall') &&
 					(!query || query.length > 1000)
@@ -260,8 +345,32 @@ function command(name: string) {
 					]);
 					if (result.status === 'partial') process.exitCode = 2;
 					else if (result.status === 'error') process.exitCode = 1;
+				} else if (name === 'read') {
+					if (!archive)
+						throw new InputError(
+							'unindexed',
+							'Archive does not exist; sync sources before reading a reference',
+						);
+					result = {
+						status: 'ok',
+						format: 'compact',
+						...focused_read(
+							archive,
+							query!,
+							options.context,
+							char_offset,
+							chars,
+						),
+						offset: 0,
+						returned_count: 1,
+						has_more: false,
+						next_offset: null,
+						truncated: false,
+					};
 				} else {
 					let rows: object[] = [];
+					let shared: Record<string, unknown> =
+						compact && name === 'recall' ? { messages: [] } : {};
 					if (name === 'sources' && selected.length) {
 						for (const source of selected) {
 							let live_status = 'available';
@@ -291,9 +400,17 @@ function command(name: string) {
 						if (name === 'sources') rows = archive.sources(options);
 						else if (name === 'sessions')
 							rows = archive.sessions(options);
-						else if (name === 'recall')
-							rows = archive.recall(query!, options);
-						else rows = archive.search(query!, options);
+						else if (name === 'recall') {
+							const matches = archive.recall(query!, options);
+							if (compact) {
+								const response = compact_recall(matches);
+								rows = response.results;
+								shared = { messages: response.messages };
+							} else rows = matches;
+						} else {
+							const matches = archive.search(query!, options);
+							rows = compact ? compact_search(matches) : matches;
+						}
 					}
 					const has_more = rows.length > options.limit;
 					rows = rows.slice(0, options.limit);
@@ -303,6 +420,8 @@ function command(name: string) {
 						freshness: 'last_explicit_sync',
 					};
 					result = {
+						...(compact ? { format: 'compact' } : {}),
+						...shared,
 						coverage,
 						status:
 							!archive ||
@@ -322,7 +441,7 @@ function command(name: string) {
 					};
 				}
 				const output = bounded_json(
-					{ schema_version: 1, ...result },
+					{ schema_version, ...result },
 					max_bytes,
 				);
 				console.log(
@@ -335,7 +454,7 @@ function command(name: string) {
 				console.log(
 					bounded_json(
 						{
-							schema_version: 1,
+							schema_version,
 							status: 'error',
 							code: error_code(error),
 							message:
@@ -368,5 +487,6 @@ export const main = defineCommand({
 		search: command('search'),
 		recall: command('recall'),
 		sessions: command('sessions'),
+		read: command('read'),
 	},
 });

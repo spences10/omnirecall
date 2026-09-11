@@ -16,6 +16,12 @@ export function bounded_json(
 		if (Array.isArray(item)) return item.map((entry) => clip(entry));
 		if (item && typeof item === 'object') {
 			const row = item as Record<string, unknown>;
+			if (
+				row.snippet_truncated ||
+				row.title_truncated ||
+				row.project_truncated
+			)
+				clipped = true;
 			const result = Object.fromEntries(
 				Object.entries(row).map(([key, entry]) => [
 					key,
@@ -32,6 +38,25 @@ export function bounded_json(
 		return item;
 	}
 	const result = clip(value) as Record<string, unknown>;
+	function prune_messages() {
+		if (
+			result.schema_version !== 2 ||
+			!Array.isArray(result.messages) ||
+			!Array.isArray(result.results)
+		)
+			return;
+		const refs = new Set(
+			result.results.flatMap((row: Record<string, unknown>) => [
+				row.ref,
+				...(Array.isArray(row.before) ? row.before : []),
+				...(Array.isArray(row.after) ? row.after : []),
+			]),
+		);
+		result.messages = result.messages.filter(
+			(message: Record<string, unknown>) => refs.has(message.ref),
+		);
+	}
+	prune_messages();
 	result.truncated = Boolean(result.truncated) || clipped;
 	let output = JSON.stringify(result);
 	while (Buffer.byteLength(output) + 1 > max_bytes) {
@@ -43,13 +68,14 @@ export function bounded_json(
 					: null;
 		if (!rows)
 			return JSON.stringify({
-				schema_version: 1,
+				schema_version: result.schema_version ?? 1,
 				status: result.status,
 				truncated: true,
 				output_budget_exceeded: true,
 				results: [],
 			});
 		rows.pop();
+		prune_messages();
 		result.truncated = true;
 		if (rows === result.issues) result.issues_truncated = true;
 		if (rows === result.results && Array.isArray(result.results)) {

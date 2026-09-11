@@ -198,6 +198,117 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 	}
 });
 
+test('compact search, focused reading, and compact recall form a bounded retrieval workflow', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omnirecall-compact-'));
+	const db = join(root, 'archive.db');
+	const pi_root = join(root, 'pi');
+	function run(args: string[]) {
+		return run_cli([...args, '--db', db, '--json']);
+	}
+	try {
+		mkdirSync(pi_root);
+		writeFileSync(
+			join(pi_root, 'session.jsonl'),
+			jsonl([
+				...pi_records(),
+				pi_entry(
+					'long',
+					'u2',
+					'assistant',
+					'🌱 padding '.repeat(1200) +
+						'migrationneedle final decision',
+				),
+			]),
+		);
+		expect(run(['sync', '--pi-root', pi_root]).status).toBe(0);
+		const compact = run(['search', 'migrationneedle']);
+		const full = run(['search', 'migrationneedle', '--full']);
+		expect(compact.status, compact.stdout).toBe(0);
+		expect(full.status, full.stdout).toBe(0);
+		const hit = JSON.parse(compact.stdout).results[0];
+		expect(JSON.parse(compact.stdout)).toMatchObject({
+			schema_version: 2,
+			format: 'compact',
+		});
+		expect(JSON.parse(full.stdout)).toMatchObject({
+			schema_version: 1,
+		});
+		expect(hit).not.toHaveProperty('content');
+		expect(hit.snippet).toContain('migrationneedle');
+		expect(Buffer.byteLength(compact.stdout)).toBeLessThan(
+			Buffer.byteLength(full.stdout) / 2,
+		);
+		const original = readFileSync(db);
+		const read = run([
+			'read',
+			hit.ref,
+			'--char-offset',
+			String(hit.char_offset),
+			'--context',
+			'0',
+		]);
+		expect(read.status, read.stdout).toBe(0);
+		expect(JSON.parse(read.stdout).messages[0].content).toContain(
+			'migrationneedle',
+		);
+		expect(readFileSync(db)).toEqual(original);
+		const first = JSON.parse(
+			run(['read', hit.ref, '--context', '0', '--chars', '20'])
+				.stdout,
+		);
+		expect(first.messages[0].next_char_offset).toBe(20);
+		const next = JSON.parse(
+			run([
+				'read',
+				hit.ref,
+				'--context',
+				'0',
+				'--chars',
+				'20',
+				'--char-offset',
+				'20',
+			]).stdout,
+		);
+		expect(next.messages[0].char_offset).toBe(20);
+		const recall = run(['recall', 'database', '--compact']);
+		expect(recall.status, recall.stdout).toBe(0);
+		expect(JSON.parse(recall.stdout)).toMatchObject({
+			schema_version: 2,
+			format: 'compact',
+		});
+		expect(JSON.parse(recall.stdout).messages.length).toBeGreaterThan(
+			0,
+		);
+		const bounded = run(['read', hit.ref, '--max-bytes', '1024']);
+		expect(bounded.status).toBe(0);
+		expect(Buffer.byteLength(bounded.stdout)).toBeLessThanOrEqual(
+			1024,
+		);
+		expect(JSON.parse(bounded.stdout)).toMatchObject({
+			schema_version: 2,
+			output_budget_exceeded: true,
+			returned_count: 0,
+			next_offset: 0,
+		});
+		for (const args of [
+			['read', 'invalid'],
+			['read', hit.ref, '--chars', '0'],
+			['read', hit.ref, '--context', '11'],
+			['read', hit.ref, '--char-offset', '-1'],
+			['read', hit.ref, '--agent', 'pi'],
+			['read', hit.ref, '--offset', '1'],
+			['search', 'migration', '--full', '--compact'],
+			['search', 'migration', '--chars', '10'],
+		]) {
+			const invalid = run(args);
+			expect(invalid.status, invalid.stdout).toBe(1);
+			expect(JSON.parse(invalid.stdout).code).toBe('arguments');
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 describe('built CLI', () => {
 	test.each([{ args: [] }, { args: ['--help'] }])(
 		'shows help for $args',
@@ -232,6 +343,7 @@ describe('built CLI', () => {
 				'search',
 				'recall',
 				'sessions',
+				'read',
 			],
 		});
 	});

@@ -245,9 +245,31 @@ pnpx omnirecall sessions --agent codex --json
 npx omnirecall recall "authentication decision" --json
 ```
 
-`--agent` selects the transcript source, not the calling assistant. A
-bounded session-read operation is also required; its syntax and
-pagination contract remain to be specified.
+`--agent` selects the transcript source, not the calling assistant.
+The working-tree extension now provides focused `read REF` retrieval
+anchored to an exact revision/message, with character paging and
+neighbor references. A general session-list-to-transcript read
+operation remains future work.
+
+Search defaults to compact JSON schema version 2: short matching
+snippets, attribution, exact message references, and character offsets
+for jumping directly to the matching passage. `search --full`
+preserves the detailed version 1 output. Compact search/recall default
+to five matches and an 8192-byte output budget.
+
+`read REF --char-offset N` returns up to 1200 Unicode characters per
+message and one dialogue neighbor per side by default. References pin
+the archived revision across subsequent syncs; old and abandoned
+evidence remains explicitly marked. Long text exposes a continuation
+character offset, and neighboring-message references permit further
+focused exploration within the same revision and branch semantics.
+
+`recall --compact` shares overlapping context in one messages array.
+Byte-budget clipping removes complete matches and unreferenced
+messages together, preserving pagination progress only for returned
+matches. Detailed recall keeps its existing output contract. No model
+call, summarization, or archive migration is required. See README for
+flags, output fields, and review examples.
 
 | ID    | Requirement                           | Acceptance condition                                                                                                                                                                            |
 | ----- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -423,8 +445,9 @@ Queries are archive-only, require no source access, and support exact
 source/project/session filters. Root configuration is explicit for
 sync. The archive defaults to the OS-specific data directory as
 omnirecall.db (resolved using Node.js built-ins), with
---db/OMNIRECALL_DB overrides. JSON is schema version 1, bounded by
-default to 65536 bytes, with explicit truncation/pagination and source
+--db/OMNIRECALL_DB overrides. Detailed JSON is schema version 1,
+bounded by default to 65536 bytes; compact output uses version 2 and
+8192 bytes. Both expose explicit truncation/pagination and source
 coverage. Exit codes are 0 completed (including empty/unindexed
 queries), 2 partial sync, 1 argument/operational failure. See README
 for exact flags.

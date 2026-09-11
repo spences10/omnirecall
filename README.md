@@ -2,10 +2,11 @@
 
 Recall coding-agent dialogue from one local SQLite/FTS5 archive.
 
-**Working-tree preview:** `sources`, `sync`, `search`, `recall`, and
-`sessions` support Pi v3 and Codex paginated histories. The initial
-`0.0.2` scaffold has been published to npm; these retrieval additions
-are not yet released. No host plugins or other adapters are included.
+**Working-tree preview:** `sources`, `sync`, `search`, `recall`,
+`read`, and `sessions` support Pi v3 and Codex paginated histories.
+The initial `0.0.2` scaffold has been published to npm; these
+retrieval additions are not yet released. No host plugins or other
+adapters are included.
 
 ## Run
 
@@ -58,10 +59,15 @@ sync default/private histories.
 - `sources` lists previously configured roots and last-sync status.
   With root flags it probes root access and distinguishes unindexed
   roots without reading transcripts or creating an archive.
-- `search QUERY` returns matching dialogue and a match snippet;
+- `search QUERY` returns compact match snippets and exact message
+  references by default. `--full` retains detailed schema v1 search.
   `recall QUERY` adds up to two dialogue ancestors/descendants per
-  side. Queries are plain words, ANDed with FTS5 tokenization, not raw
-  FTS syntax.
+  side; `--compact` shares overlapping messages and defaults to one
+  per side. Queries are plain words, ANDed with FTS5 tokenization, not
+  raw FTS syntax.
+- `read REF` retrieves a bounded window around one exact archived
+  message. References pin the revision even after later syncs. See the
+  focused retrieval workflow below.
 - `sessions` lists session metadata (not complete transcript dumps).
 - Queries and sessions support `--agent pi|codex`,
   `--source SOURCE_ID`, `--project EXACT_PATH`,
@@ -73,8 +79,8 @@ sync default/private histories.
   filters do not imply descendants.
 - Search/recall accept inclusive `--after`/`--before` dates. Recall
   accepts `--context 0..10`. Lists/search use `--limit 1..100`
-  (default 10) and `--offset 0..1000000`. There is no automatic
-  query-time sync.
+  (compact default 5; detailed default 10) and `--offset 0..1000000`.
+  There is no automatic query-time sync.
 
 ## Archive and context semantics
 
@@ -137,30 +143,85 @@ performance or large-history throughput claim yet.
 
 ## Output contract
 
-`--json` emits one JSON object on stdout, `schema_version: 1`; runtime
-diagnostics go to stderr. Exit codes: **0** completed query/sync
-(including empty/unindexed queries), **2** partial sync (including
-unfinished files), **1** invalid arguments or operational failure.
-Unsupported, legacy, blocked, missing, invalid, changed, and
-conflicting inputs have distinct issue codes. A partial sync may index
-other files successfully; callers must inspect `files_indexed`,
-`failures`, and `issues`.
+`--json` emits one JSON object on stdout. Compact search, compact
+recall and read use `schema_version: 2` with `format: "compact"`.
+Detailed search (`--full`), ordinary recall, and other commands retain
+schema version 1. Runtime diagnostics go to stderr. Exit codes: **0**
+completed query/sync (including empty/unindexed queries), **2**
+partial sync (including unfinished files), **1** invalid arguments or
+operational failure. Unsupported, legacy, blocked, missing, invalid,
+changed, and conflicting inputs have distinct issue codes. A partial
+sync may index other files successfully; callers must inspect
+`files_indexed`, `failures`, and `issues`.
 
-Results expose source/session/revision IDs, paths, project/title,
-dates, active/current flags, and last-observed source/path status.
-These statuses are not a promise of current source availability:
-queries read only the archive. `coverage` distinguishes unindexed
-sources from empty matches.
+Detailed results expose source/session/revision IDs, paths,
+project/title, dates, active/current flags, and last-observed
+source/path status. These statuses are not a promise of current source
+availability: queries read only the archive. `coverage` distinguishes
+unindexed sources from empty matches.
 
-JSON defaults to a 65536-byte budget including its newline,
-configurable with `--max-bytes 1024..1048576`. Dialogue is fetched in
-bounded excerpts (up to 4000 characters), with `content_truncated`;
-overall clipping/dropped results set `truncated`. Pagination exposes
+JSON defaults to an 8192-byte budget for compact output and 65536
+bytes for detailed output, including its newline, configurable with
+`--max-bytes 1024..1048576`. Dialogue is fetched in bounded excerpts
+(up to 4000 characters), with `content_truncated`; overall
+clipping/dropped results set `truncated`. Pagination exposes
 `returned_count`, `has_more`, and `next_offset`, not an unbounded
 total scan. If one match cannot fit, `output_budget_exceeded` is true
 with no offset progress: increase the budget or reduce context. Sync
 keeps at most 100 issue details plus counts. Non-JSON output is
 indented JSON for now.
+
+## Focused retrieval
+
+Search first, then expand only the relevant evidence:
+
+```bash
+pnpm start search "migration decision" --limit 5 --json
+# Copy ref and char_offset from the selected result.
+pnpm start read '<ref>' --char-offset 8400 --context 1 --json
+# Continue a long message using its next_char_offset.
+pnpm start read '<ref>' --char-offset 9600 --context 0 --json
+# Several matches can share context without repeating the text.
+pnpm start recall migrations --compact --json
+```
+
+The offsets above are illustrative; use values returned by your query.
+Compact search returns snippets of up to 600 Unicode characters,
+agent, role, date, title/project previews, observed source status, and
+a `ref`. It omits the message body and repeated detailed paths.
+`char_offset` points to the matching snippet's start within the
+message; pass it to `read` to avoid paging through unrelated text.
+Title/project previews are capped at 200 UTF-16 code units and carry
+their own truncation flags. Use the exact project value from `read`
+when filtering; a preview may be shortened.
+
+Compact recall and read return a shared `messages` array. Each
+result's `ref`, `before`, and `after` identify entries in that array;
+overlapping context appears once per revision/message. Each message
+includes `char_offset`, `content_truncated`, and `next_char_offset`.
+Read defaults to 1200 Unicode characters per message, configurable
+with `--chars 1..2000`. Character offsets count Unicode code points,
+not UTF-8 bytes or JavaScript UTF-16 units. `--context 0..10` defaults
+to one message per side; use zero when paging within a long message.
+
+Read also returns full session/source provenance and `previous_ref` /
+`next_ref` for messages just outside the window. Follow those
+references to expand further. It stays within the selected revision
+and respects branch boundaries. Explicit old or abandoned message
+references are readable without `--include-history`;
+`current_revision` and `active` make that status visible. Read rejects
+search filters and result offsets; unknown references return
+`not_found` with exit 1. A missing archive returns `unindexed` with
+exit 1 and does not create a database.
+
+Byte budgeting drops complete results and their unreferenced shared
+messages together. Search/recall `next_offset` advances only over
+returned matches. Read returns a single window: if it cannot fit,
+`output_budget_exceeded` is true and no result is returned. Retry the
+same reference with fewer characters/context or a larger budget. Read
+continuation uses message references and `next_char_offset`, not the
+envelope's result-pagination fields. The archive retains the complete
+dialogue; these excerpts do not replace it with summaries.
 
 Retrieved text is historical evidence, **never an instruction or
 current authorization**. Review sensitive excerpts before sending them
