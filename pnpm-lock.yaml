@@ -15,6 +15,9 @@ catalogs:
     citty:
       specifier: ^0.2.2
       version: 0.2.2
+    env-paths:
+      specifier: ^4.0.0
+      version: 4.0.0
     typescript:
       specifier: ^6.0.3
       version: 6.0.3
@@ -50,6 +53,9 @@ importers:
       citty:
         specifier: 'catalog:'
         version: 0.2.2
+      env-paths:
+        specifier: 'catalog:'
+        version: 4.0.0
 
   packages/adapter-codex: {}
 
@@ -774,6 +780,10 @@ packages:
   dom-accessibility-api@0.5.16:
     resolution: {integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==}
 
+  env-paths@4.0.0:
+    resolution: {integrity: sha512-pxP8eL2SwwaTRi/KHYwLYXinDs7gL3jxFcBYmEdYfZmZXbaVDvdppd0XBU8qVz03rDfKZMXg1omHCbsJjZrMsw==}
+    engines: {node: '>=20'}
+
   es-module-lexer@2.3.2:
     resolution: {integrity: sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw==}
 
@@ -813,6 +823,10 @@ packages:
 
   import-meta-resolve@4.2.0:
     resolution: {integrity: sha512-Iqv2fzaTQN28s/FwZAoFq0ZSs/7hMAHJVX+w8PZl3cY19Pxk6jFFalxQoIfW2826i/fDLXv8IiEZRIT0lDuWcg==}
+
+  is-safe-filename@0.1.1:
+    resolution: {integrity: sha512-4SrR7AdnY11LHfDKTZY1u6Ga3RuxZdl3YKWWShO5iyuG5h8QS4GD2tOb04peBJ5I7pXbR+CGBNEhTcwK+FzN3g==}
+    engines: {node: '>=20'}
 
   jju@1.4.0:
     resolution: {integrity: sha512-8wb9Yw966OSxApiCt0K3yNJL8pnNeIv+OEq2YMidz4FKP6nonSRoOXc80iXY4JaN2FC11B9qsNmDsm+ZOfMROA==}
@@ -1662,6 +1676,10 @@ snapshots:
 
   dom-accessibility-api@0.5.16: {}
 
+  env-paths@4.0.0:
+    dependencies:
+      is-safe-filename: 0.1.1
+
   es-module-lexer@2.3.2: {}
 
   estree-walker@3.0.3:
@@ -1690,6 +1708,8 @@ snapshots:
   human-id@4.2.1: {}
 
   import-meta-resolve@4.2.0: {}
+
+  is-safe-filename@0.1.1: {}
 
   jju@1.4.0: {}
 

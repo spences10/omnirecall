@@ -34,10 +34,20 @@ sync default/private histories.
 
 ## Configuration and commands
 
-- Archive: `--db /path/archive.sqlite`, then `OMNIRECALL_DB`, then
-  `~/.local/share/omnirecall/archive.sqlite`. New archives/directories
-  use restrictive permissions. Existing non-Omni databases are
-  refused.
+- Archive: `--db /path/omnirecall.db`, then `OMNIRECALL_DB`, then the
+  platform data directory from
+  [env-paths](https://github.com/sindresorhus/env-paths):
+  - Linux: `$XDG_DATA_HOME/omnirecall/omnirecall.db`, falling back to
+    `~/.local/share/omnirecall/omnirecall.db`.
+  - macOS: `~/Library/Application Support/omnirecall/omnirecall.db`.
+  - Windows: `%LOCALAPPDATA%\omnirecall\Data\omnirecall.db`, falling
+    back to `AppData\Local` under the user profile.
+
+  New archives/directories use restrictive permissions where
+  supported. Existing non-Omni databases are refused.
+  Platform-specific path resolution is not a claim that the entire CLI
+  has been tested on every OS.
+
 - `sync` requires `--pi-root` and/or `--codex-root` on every
   invocation. Roots are recursively scanned for `.jsonl`; no agent
   executable is needed. Use a tree containing only that agent's
@@ -67,6 +77,12 @@ sync default/private histories.
   query-time sync.
 
 ## Archive and context semantics
+
+Earlier previews defaulted to
+`~/.local/share/omnirecall/archive.sqlite`. Existing archives are not
+renamed or moved automatically: use `--db` with their existing
+location to keep accessing them. Explicit overrides keep the filename
+you provide.
 
 Original transcripts and sibling recall databases remain untouched.
 **This is a durable dialogue archive, not a rebuildable cache.**

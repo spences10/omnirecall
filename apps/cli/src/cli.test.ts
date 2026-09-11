@@ -25,11 +25,11 @@ const package_metadata = JSON.parse(
 	readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ) as { name: string; version: string };
 
-function run_cli(args: string[]) {
+function run_cli(args: string[], env: NodeJS.ProcessEnv = {}) {
 	return spawnSync(process.execPath, [entry_path, ...args], {
 		encoding: 'utf8',
 		timeout: 10_000,
-		env: { ...process.env, NO_COLOR: '1' },
+		env: { ...process.env, NO_COLOR: '1', ...env },
 	});
 }
 
@@ -264,4 +264,43 @@ test('build ships the SQL schema unchanged beside the executable', () => {
 			'utf8',
 		),
 	);
+});
+
+test('creates omnirecall.db in the platform data directory', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omnirecall-paths-'));
+	try {
+		const pi_root = join(root, 'sessions');
+		mkdirSync(pi_root);
+		writeFileSync(
+			join(pi_root, 'session.jsonl'),
+			jsonl(pi_records()),
+		);
+		const env = {
+			HOME: root,
+			USERPROFILE: root,
+			XDG_DATA_HOME: join(root, 'xdg-data'),
+			LOCALAPPDATA: join(root, 'local-data'),
+			OMNIRECALL_DB: undefined,
+		};
+		const data_dir =
+			process.platform === 'darwin'
+				? join(root, 'Library', 'Application Support', 'omnirecall')
+				: process.platform === 'win32'
+					? join(root, 'local-data', 'omnirecall', 'Data')
+					: join(root, 'xdg-data', 'omnirecall');
+		const result = run_cli(
+			['sync', '--pi-root', pi_root, '--json'],
+			env,
+		);
+		expect(result.status, result.stderr + result.stdout).toBe(0);
+		expect(existsSync(join(data_dir, 'omnirecall.db'))).toBe(true);
+		expect(existsSync(join(data_dir, 'archive.sqlite'))).toBe(false);
+		const recalled = run_cli(['recall', 'migrations', '--json'], env);
+		expect(recalled.status, recalled.stderr + recalled.stdout).toBe(
+			0,
+		);
+		expect(JSON.parse(recalled.stdout).returned_count).toBe(1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });

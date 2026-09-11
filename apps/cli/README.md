@@ -26,9 +26,18 @@ explicit roots; queries never auto-sync or read source transcripts.
 
 ## Configuration
 
-`--db PATH` overrides `OMNIRECALL_DB`, otherwise the archive lives at
-`~/.local/share/omnirecall/archive.sqlite`, separate from sibling
-tools. Existing non-Omni databases are refused. Source roots
+`--db PATH` overrides `OMNIRECALL_DB`. Otherwise the database is named
+`omnirecall.db` inside the platform data directory, resolved by
+[env-paths](https://github.com/sindresorhus/env-paths):
+
+- Linux: `$XDG_DATA_HOME/omnirecall`, or `~/.local/share/omnirecall`.
+- macOS: `~/Library/Application Support/omnirecall`.
+- Windows: `%LOCALAPPDATA%\omnirecall\Data`, or
+  `AppData\Local\omnirecall\Data` under the user profile.
+
+Old `archive.sqlite` files are not automatically moved or renamed;
+continue using them with `--db PATH`. The archive is separate from
+sibling tools. Existing non-Omni databases are refused. Source roots
 recursively contain JSONL transcripts; a Codex root may contain both
 `sessions/` and `archived_sessions/`, plus optional
 `session_index.jsonl` titles. `sources` reports known roots; with root

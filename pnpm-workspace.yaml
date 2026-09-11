@@ -8,6 +8,7 @@ catalog:
   '@changesets/cli': ^3.0.2
   '@types/node': ^24.0.0
   citty: ^0.2.2
+  env-paths: ^4.0.0
   typescript: ^6.0.3
   vite-plus: '0.2.0'
   vitest: '4.1.9'

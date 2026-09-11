@@ -1,8 +1,7 @@
 import { defineCommand } from 'citty';
+import { database_path } from './paths.ts';
 import { constants, existsSync, readFileSync } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
 import { codex_adapter } from '../../../packages/adapter-codex/src/index.ts';
 import { pi_adapter } from '../../../packages/adapter-pi/src/index.ts';
 import {
@@ -250,17 +249,7 @@ function command(name: string) {
 						'arguments',
 						'Provide a query of 1–1000 characters',
 					);
-				const db_path = resolve(
-					args.db ??
-						process.env.OMNIRECALL_DB ??
-						join(
-							homedir(),
-							'.local',
-							'share',
-							'omnirecall',
-							'archive.sqlite',
-						),
-				);
+				const db_path = database_path(args.db);
 				if (name === 'sync' || existsSync(db_path))
 					archive = new Archive(db_path, name !== 'sync');
 				let result: Record<string, unknown>;
