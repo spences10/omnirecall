@@ -80,3 +80,10 @@ Before marking an agent implemented:
 
 See [archive design](docs/archive-design.md) for storage and sync
 behaviour.
+
+## Repository skills
+
+For tooling changes, read
+[change-repo-tooling](.agents/skills/change-repo-tooling/SKILL.md).
+For sync performance investigations and comparisons, read
+[benchmark-sync](.agents/skills/benchmark-sync/SKILL.md).
