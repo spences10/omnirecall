@@ -322,6 +322,11 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 	}
 });
 
+// Node 24.11 emits this runtime warning when node:sqlite is imported.
+// Accept that warning only; application diagnostics must still fail these checks.
+const clean_stderr =
+	/^(?:\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n)?$/;
+
 describe('built CLI', () => {
 	test.each([{ args: [] }, { args: ['--help'] }])(
 		'shows help for $args',
@@ -330,7 +335,7 @@ describe('built CLI', () => {
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain('omnirecall');
 			expect(result.stdout).toContain('info');
-			expect(result.stderr).toBe('');
+			expect(result.stderr).toMatch(clean_stderr);
 		},
 	);
 
@@ -338,20 +343,19 @@ describe('built CLI', () => {
 		const result = run_cli(['--version']);
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain(package_metadata.version);
-		expect(result.stderr).toBe('');
+		expect(result.stderr).toMatch(clean_stderr);
 	});
 
 	test('returns clean JSON with implemented preview capabilities', () => {
 		const result = run_cli(['info', '--json']);
 		expect(result.status).toBe(0);
-		expect(result.stderr).toBe('');
+		expect(result.stderr).toMatch(clean_stderr);
 		expect(JSON.parse(result.stdout)).toEqual({
 			schema_version: 1,
 			name: package_metadata.name,
 			version: package_metadata.version,
 			status: 'preview',
 			capabilities: [
-				'guide',
 				'sources',
 				'sync',
 				'search',
@@ -360,7 +364,7 @@ describe('built CLI', () => {
 				'read',
 			],
 			agent_instructions:
-				'Run omnirecall guide before retrieving session evidence.',
+				'Use <command> --help for options; search --json, then read an exact ref.',
 		});
 	});
 
@@ -488,6 +492,21 @@ test('Claude tool search and raw-record continuation work through the built CLI'
 		expect(imported.status, imported.stdout + imported.stderr).toBe(
 			0,
 		);
+		for (const [flags, count] of [
+			[[], 0],
+			[['--kind', 'all'], 1],
+		] as const) {
+			const result = run_cli([
+				'search',
+				'tool_unique_failure',
+				'--db',
+				db,
+				'--json',
+				...flags,
+			]);
+			expect(result.status).toBe(0);
+			expect(JSON.parse(result.stdout).results).toHaveLength(count);
+		}
 		const search = run_cli([
 			'search',
 			'tool_unique_failure',
@@ -685,4 +704,18 @@ test('build ships migration resources unchanged', () => {
 				new URL(`../dist/migrations/${name}`, import.meta.url),
 			),
 		).toEqual(readFileSync(new URL(name, source)));
+});
+
+test('command help exposes only relevant options without a separate guide', () => {
+	const sync = run_cli(['sync', '--help']);
+	expect(sync.stdout).toContain('--pi-root');
+	expect(sync.stdout).not.toContain('--kind');
+	expect(sync.stdout).not.toContain('--char-offset');
+	const search = run_cli(['search', '--help']);
+	expect(search.stdout).toContain('message (default)');
+	expect(search.stdout).not.toContain('--pi-root');
+	const read = run_cli(['read', '--help']);
+	expect(read.stdout).toContain('--char-offset');
+	expect(read.stdout).not.toContain('--agent');
+	expect(run_cli(['--help']).stdout).not.toContain('guide');
 });

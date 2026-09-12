@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test, vi } from 'vitest';
 import { Archive } from './database.ts';
+import { sql } from './queries.ts';
 import { type Source, type Transcript } from './types.ts';
 
 const source: Source = {
@@ -182,6 +183,79 @@ test('opens the current schema read-only without modifying the database', () => 
 		}
 		expect(readFileSync(path)).toEqual(original);
 	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('search provenance uses indexed session inputs instead of scanning all resources', () => {
+	const db = new DatabaseSync(':memory:');
+	try {
+		db.exec(
+			readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'),
+		);
+		const plan = db
+			.prepare('EXPLAIN QUERY PLAN ' + sql.search)
+			.all({
+				$query: 'migration',
+				$agent: null,
+				$source: null,
+				$project: null,
+				$session: null,
+				$include_history: 0,
+				$kind: null,
+				$after: null,
+				$before: null,
+				$limit: 2,
+				$offset: 0,
+			})
+			.map((row) => String(row.detail));
+		expect(
+			plan.some((detail) => /SCAN candidate\b/.test(detail)),
+		).toBe(false);
+		expect(
+			plan.some((detail) => /SEARCH ri .*archive_id=/.test(detail)),
+		).toBe(true);
+		expect(
+			plan.some((detail) =>
+				/SEARCH candidate .*source_id=.*path=/.test(detail),
+			),
+		).toBe(true);
+	} finally {
+		db.close();
+	}
+});
+
+test('provenance prefers available inputs and excludes unrelated resources', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omnirecall-provenance-'));
+	const path = join(root, 'archive.sqlite');
+	const archive = new Archive(path);
+	try {
+		archive.register(source, 'available');
+		archive.store(source, '/test/a.jsonl', transcript, snapshot);
+		const db = new DatabaseSync(path);
+		try {
+			db.exec(`
+    UPDATE resources SET status='partial', checked_at='2026-01-03';
+    INSERT INTO resources(source_id,path,status,checked_at)
+     VALUES ('pi:test','/test/b.jsonl','available','2026-01-01'),
+            ('pi:test','/test/unrelated.jsonl','available','2026-01-04');
+    INSERT INTO session_inputs(archive_id,source_id,path,fingerprint,byte_offset)
+     SELECT archive_id,source_id,'/test/b.jsonl','test',0 FROM sessions;
+   `);
+		} finally {
+			db.close();
+		}
+		for (const row of [
+			...archive.search('migration', options),
+			...archive.sessions(options),
+		]) {
+			expect(row).toMatchObject({
+				source_path: '/test/b.jsonl',
+				path_status: 'available',
+			});
+		}
+	} finally {
+		archive.close();
 		rmSync(root, { recursive: true, force: true });
 	}
 });

@@ -1,71 +1,52 @@
 # omnirecall
 
-Search a durable local archive of Pi, Codex, and Claude Code session
-evidence. This working-tree preview preserves original JSON alongside
-searchable dialogue, reasoning, tool calls/results, and summaries.
+[![Verify](https://github.com/spences10/omnirecall/actions/workflows/verify.yml/badge.svg)](https://github.com/spences10/omnirecall/actions/workflows/verify.yml)
+[![built with vite+](https://img.shields.io/badge/built%20with-Vite+-646CFF?logo=vite&logoColor=white)](https://viteplus.dev)
+[![tested with vitest](https://img.shields.io/badge/tested%20with-Vitest-6E9F18?logo=vitest)](https://vitest.dev)
 
-For LLM callers, start with `pnpx omnirecall guide` (or
-`guide --json`). The bundled guide teaches coverage checks, keyword
-refinement, filters, pagination, context expansion, and evidence
-verification. The model turns the user's question into short search
-queries and answers from the retrieved evidence. Run
-`node apps/cli/dist/index.js guide` after building this unreleased
-checkout.
+Find answers in your past coding conversations—even when they happened
+in a different agent.
+
+OmniRecall searches Pi, Codex, and Claude Code session histories in
+one local archive. Recover a decision, find a command that worked, or
+give your current assistant the context it needs to continue earlier
+work.
+
+- Search across agents without remembering which one you used.
+- Read the conversation around a match and inspect original tool
+  output.
+- Keep imported history searchable after its source files disappear.
+- Keep your archive on your machine; no account or hosted service
+  needed.
+
+## Use in your coding assistant
+
+Ask directly in your current CLI conversation:
+
+> Use pnpx omnirecall to find that session where we changed the
+> database queries and fixed slow search. What did we change?
+
+Or use `npx omnirecall` in the same request. Your assistant runs the
+commands, searches earlier sessions, and reads the relevant context
+without you leaving the conversation.
+
+> Use npx omnirecall to find how we fixed the authentication bug last
+> week, and use that context to help with this issue.
+
+Requires Node.js 24.11 or newer.
+
+## Run commands directly
 
 ```bash
-pnpx omnirecall guide
 pnpx omnirecall sync
-# Optional explicit locations:
-pnpx omnirecall sync --pi-root /path/to/pi/sessions \
-  --codex-root /path/to/codex/history-tree \
-  --claude-root /path/to/claude/projects --json
-pnpx omnirecall search "database failure" --kind tool_result --json
-pnpx omnirecall read '<ref>' --context 1 --json
-pnpx omnirecall read '<ref>' --raw --chars 1200 --json
+pnpx omnirecall search "database migration"
+pnpx omnirecall read '<ref from search>' --context 2
 ```
 
-These commands describe the next release. For the working tree, use
-`pnpm build` and `pnpm start` from the repository root. Requires
-Node.js 24.11+.
+Run `sync` to pick up new conversations. Add `--json` for structured
+results. Search defaults to conversation messages; use `--kind all` to
+include tool activity. Each command's `--help` lists its options.
 
-Search first and expand selected results. `read --raw` pages through
-the original record; follow `next_char_offset` for longer content.
-`sessions` returns a `first_record_ref` for walking raw history,
-including records without searchable text. Raw excerpts may be
-fragments of JSON.
-
-Plain sync prints a short summary of processed/unchanged files,
-updated sessions, and grouped issue counts. Use `--verbose` to include
-individual issue paths and errors, or `--json` for quiet, structured
-results. Detailed issues are capped at 100; grouped counts include
-every issue. Partial syncs retain exit code 2, and operational
-failures retain exit code 1.
-
-Interactive terminals show progress and elapsed time on stderr.
-Captured output contains only the summary. Unchanged inputs reuse a
-persistent checkpoint and are counted in `files_skipped` (also
-included in `files_indexed`). Each input is processed independently.
-
-Cache checks include file identity, size, nanosecond
-modification/change times, permissions, parser version and title
-metadata. Growing JSONL files resume after the saved offset once their
-imported prefix is verified. Rewrites replace the stored session.
-Records, searchable text and checkpoints are committed together.
-
-Plain sync discovers standard Pi/Claude/Codex locations and reuses
-stored roots. Explicit root flags override that selection. Queries use
-only the archive. Missing source histories do not erase archived
-evidence. `--include-history` exposes inactive work and alternative
-representations still present in the imported source history. Previous
-file versions are not retained. External attachment files are not
-copied.
-
-The Claude adapter covers an initial set of transcript shapes, keeps
-subagent files separate, and reports branch state as unknown. It does
-not yet import team/task files or fully interpret Claude compaction.
-Pi v3 and Codex paginated histories retain their format validation.
-
-See the
-[repository documentation](https://github.com/spences10/omnirecall)
-for filters, output budgets, database paths, design notes, and
-validation.
+Supports Pi v3, Codex paginated histories, and Claude Code
+transcripts, including separate subagent sessions. Claude team/task
+files and legacy Codex histories are not currently supported.

@@ -20,8 +20,10 @@ const session_filter = `
 const provenance_join = `
 	LEFT JOIN resources p ON p.rowid = (
 		SELECT candidate.rowid
-		FROM resources candidate
-		WHERE EXISTS (SELECT 1 FROM session_inputs ri WHERE ri.archive_id = r.archive_id AND ri.source_id=candidate.source_id AND ri.path=candidate.path)
+		FROM session_inputs ri
+		JOIN resources candidate
+			ON candidate.source_id = ri.source_id AND candidate.path = ri.path
+		WHERE ri.archive_id = r.archive_id
 		ORDER BY
 			CASE candidate.status
 				WHEN 'available' THEN 0

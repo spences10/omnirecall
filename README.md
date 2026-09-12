@@ -1,191 +1,52 @@
 # omnirecall
 
-Find evidence from previous coding-agent sessions in one durable local
-SQLite/FTS5 archive. Ask your current assistant to use
-`pnpx omnirecall` to find an earlier discussion, command, tool result,
-or decision.
+[![Verify](https://github.com/spences10/omnirecall/actions/workflows/verify.yml/badge.svg)](https://github.com/spences10/omnirecall/actions/workflows/verify.yml)
+[![built with vite+](https://img.shields.io/badge/built%20with-Vite+-646CFF?logo=vite&logoColor=white)](https://viteplus.dev)
+[![tested with vitest](https://img.shields.io/badge/tested%20with-Vitest-6E9F18?logo=vitest)](https://vitest.dev)
 
-**Working-tree preview:** Pi v3, Codex paginated histories, and an
-initial Claude Code transcript adapter. These changes are not yet
-released. The published npm scaffold does not include this complete
-workflow.
+Find answers in your past coding conversations—even when they happened
+in a different agent.
 
-## For coding assistants
+OmniRecall searches Pi, Codex, and Claude Code session histories in
+one local archive. Recover a decision, find a command that worked, or
+give your current assistant the context it needs to continue earlier
+work.
 
-Start with `pnpx omnirecall guide` for the retrieval workflow. In this
-unreleased checkout, build first and run
-`node apps/cli/dist/index.js guide`. The guide is bundled with the
-CLI; `guide --json` returns the same instructions in a JSON envelope.
+- Search across agents without remembering which one you used.
+- Read the conversation around a match and inspect original tool
+  output.
+- Keep imported history searchable after its source files disappear.
+- Keep your archive on your machine; no account or hosted service
+  needed.
 
-The model interprets the user's question and searches with short
-terms, then reads selected references and verifies the evidence before
-answering. For example, “why did we choose SQLite?” may become
-searches for `sqlite`, `sqlite chose`, and `sqlite postgres`. Terms
-are ANDed within one part; try alternatives in separate searches.
-Start with `--kind message` for discussions and use
-`--kind tool_result` to corroborate recorded actions. Check source
-coverage and freshness, broaden filters when needed, and follow
-pagination before treating a first page as the complete results.
+## Use in your coding assistant
 
-An instruction for your coding assistant:
+Ask directly in your current CLI conversation:
 
-> For questions about earlier coding sessions, use omnirecall. Read
-> `pnpx omnirecall guide` first, then search and read evidence with
-> `--json`. Cite the source agent, project, date, and exact reference;
-> distinguish historical claims and examples from verified actions.
+> Use pnpx omnirecall to find that session where we changed the
+> database queries and fixed slow search. What did we change?
 
-## Development
+Or use `npx omnirecall` in the same request. Your assistant runs the
+commands, searches earlier sessions, and reads the relevant context
+without you leaving the conversation.
 
-Requires Node.js 24.11+ and pnpm 12.3.4.
+> Use npx omnirecall to find how we fixed the authentication bug last
+> week, and use that context to help with this issue.
 
-```bash
-pnpm install --frozen-lockfile
-pnpm build
-pnpm start info --json
-pnpm start sync --json
-pnpm start sync --pi-root /path/to/pi/sessions \
-  --codex-root /path/to/codex/history-tree \
-  --claude-root /path/to/claude/projects --json
-pnpm start search "database failure" --kind tool_result --json
-pnpm start read '<ref from search>' --context 1 --json
-pnpm start read '<ref from search>' --raw --chars 1200 --json
-```
+Requires Node.js 24.11 or newer.
 
-After release, replace `pnpm start` with `pnpx omnirecall` or
-`npx omnirecall`. The CLI is the only publishable package; adapters
-and core are private workspace packages bundled into it.
-
-## Archive and import
-
-Plain `sync` reuses configured roots and discovers available standard
-locations: `~/.pi/agent/sessions`, `~/.claude/projects`, and Codex
-histories under `$CODEX_HOME` (default `~/.codex`). Codex home
-discovery scans `sessions/` and `archived_sessions/`, excluding
-unrelated home JSONL files. Overlapping defaults are skipped when that
-agent already has a configured root covering or inside them.
-Previously configured missing roots still report their availability
-rather than silently disappearing.
-
-Root flags select only those explicit locations for that invocation;
-`--agent` and `--source` filter the selection. With no matching
-sources, `sync` creates an empty archive and reports `status: empty`
-with an explanation. `sources` reports indexed roots or probes
-supplied roots. Source files are read without changing them. Retrieval
-reads only the archive and never syncs automatically or follows a path
-into a sibling recall database.
-
-Each accepted source record retains its original JSON envelope.
-Searchable parts include dialogue, thinking, tool calls/results,
-recorded summaries, and supported operations. Some records are
-available only through raw reading. `unindexed_records` counts records
-without a searchable part; it does not mean their payloads were
-discarded.
-
-Each session has one stored set of records. Unchanged inputs are
-skipped. For growing JSONL files, sync verifies the imported prefix
-and resumes JSON decoding at the saved byte offset. Existing records
-remain stored; searchable messages are updated when the conversation
-changes. Rewritten or truncated files replace that session's stored
-content atomically. Missing files or roots never remove archived
-evidence.
-
-References address the stored session, so reading one after a
-correction returns the updated content. Previous versions of a
-rewritten file are not retained. Separate input files have separate
-session identities, including copies sharing the same native session
-ID.
-
-Pi and Codex retain unfamiliar event types as raw records. Unknown
-Codex semantics mark searchable state as unknown. Malformed known
-records still report an import issue. Claude preserves extra
-envelopes, but its initial adapter rejects mixed session IDs and
-repeated message UUIDs within one file. Subagent files under
-`subagents/` get separate qualified conversation identities; Claude
-branch state is reported as unknown. Team/task JSON ingestion and
-complete Claude compaction semantics remain future work. All automated
-fixtures are synthetic; passing them is not exhaustive format
-coverage.
-
-Only complete, newline-terminated valid UTF-8 JSON records are
-imported. A trailing partial record waits for another sync. Invalid
-complete input keeps the previous successful import. JSONL files are
-limited to 64 MiB; source-tree symlinks are unsupported. A generic
-adapter can supply several sessions or input locations in one import
-unit. The unit commits atomically.
-
-Inline content stays in the original JSON. External attachment paths
-are references; their files are not copied. The archive can contain
-sensitive session content. Retrieved history is evidence, not current
-instructions or authorization.
-
-## Focused retrieval
-
-- `search QUERY`: compact snippets and stable part references.
-  `--full` returns detailed results. Search terms are ANDed plain
-  words, not raw FTS syntax.
-- `recall QUERY --compact`: bounded context with overlapping parts
-  shared.
-- `read REF`: a bounded part window. A tool result follows its call ID
-  only when that call is unambiguous. Dialogue context respects
-  branches.
-- `read REF --raw`: an excerpt of the complete original JSON record.
-  Follow `next_char_offset` to finish a long record. Excerpts are JSON
-  text fragments, not necessarily independently parseable JSON
-  objects.
-- `sessions`: session metadata and `first_record_ref`. Record
-  references (`r1.…`) select raw reading automatically;
-  `previous_ref`/`next_ref` navigate source records, including those
-  without searchable text.
-
-Search/recall support `--kind`, `--agent pi|codex|claude`, `--source`,
-`--project` (exact path), `--session`, `--after`, `--before`, and
-`--include-history`. Historical search includes superseded correction
-parts retained in the source history. Source IDs namespace roots;
-native IDs are not assumed globally unique.
-
-`--limit 1..100`, `--offset 0..1000000`, and `--context 0..10` bound
-result counts and context. Read accepts `--chars 1..2000` and
-`--char-offset` in Unicode code points. `--raw` does not accept an
-explicit context size.
-
-JSON output has explicit truncation and continuation information.
-`--max-bytes 1024..1048576` controls the total budget (compact default
-8192, detailed default 65536). An `output_budget_exceeded` response
-with no progress means retry with less context/content or a larger
-budget. Compact output uses envelope version 2; detailed output uses
-version 1. Both now include evidence fields such as kind and state
-where applicable. Exit codes: 0 completed, 2 partial import, 1 invalid
-arguments or failure.
-
-## Database location
-
-Precedence: `--db`, then `OMNIRECALL_DB`, then the platform data
-directory:
-
-- Linux: `$XDG_DATA_HOME/omnirecall/omnirecall.db`, falling back to
-  `~/.local/share/omnirecall/omnirecall.db`.
-- macOS: `~/Library/Application Support/omnirecall/omnirecall.db`.
-- Windows: `%LOCALAPPDATA%\omnirecall\Data\omnirecall.db`.
-
-New files/directories use restrictive permissions where supported.
-Foreign databases are refused. Back up the archive when no sync is
-running; original sources may no longer contain everything it retains.
-
-## Design and validation
-
-See [agent support and format research](AGENTS.md) and
-[archive design](docs/archive-design.md). The executable schema is
-[schema.sql](packages/core/src/schema.sql).
+## Run commands directly
 
 ```bash
-pnpm verify
+pnpx omnirecall sync
+pnpx omnirecall search "database migration"
+pnpx omnirecall read '<ref from search>' --context 2
 ```
 
-Dependency versions use the workspace catalog. Use pnpm packaging so
-published manifests contain resolved version ranges. Tests use
-temporary synthetic sources and never sync private histories.
+Run `sync` to pick up new conversations. Add `--json` for structured
+results. Search defaults to conversation messages; use `--kind all` to
+include tool activity. Each command's `--help` lists its options.
 
-MIT — Scott Spence. Builds on
-[pirecall](https://github.com/spences10/pirecall),
-[ccrecall](https://github.com/spences10/ccrecall), and
-[ocrecall](https://github.com/spences10/ocrecall).
+Supports Pi v3, Codex paginated histories, and Claude Code
+transcripts, including separate subagent sessions. Claude team/task
+files and legacy Codex histories are not currently supported.
