@@ -351,7 +351,6 @@ describe('built CLI', () => {
 			version: package_metadata.version,
 			status: 'preview',
 			capabilities: [
-				'guide',
 				'sources',
 				'sync',
 				'search',
@@ -360,7 +359,7 @@ describe('built CLI', () => {
 				'read',
 			],
 			agent_instructions:
-				'Run omnirecall guide before retrieving session evidence.',
+				'Use <command> --help for options; search --json, then read an exact ref.',
 		});
 	});
 
@@ -488,6 +487,21 @@ test('Claude tool search and raw-record continuation work through the built CLI'
 		expect(imported.status, imported.stdout + imported.stderr).toBe(
 			0,
 		);
+		for (const [flags, count] of [
+			[[], 0],
+			[['--kind', 'all'], 1],
+		] as const) {
+			const result = run_cli([
+				'search',
+				'tool_unique_failure',
+				'--db',
+				db,
+				'--json',
+				...flags,
+			]);
+			expect(result.status).toBe(0);
+			expect(JSON.parse(result.stdout).results).toHaveLength(count);
+		}
 		const search = run_cli([
 			'search',
 			'tool_unique_failure',
@@ -685,4 +699,18 @@ test('build ships migration resources unchanged', () => {
 				new URL(`../dist/migrations/${name}`, import.meta.url),
 			),
 		).toEqual(readFileSync(new URL(name, source)));
+});
+
+test('command help exposes only relevant options without a separate guide', () => {
+	const sync = run_cli(['sync', '--help']);
+	expect(sync.stdout).toContain('--pi-root');
+	expect(sync.stdout).not.toContain('--kind');
+	expect(sync.stdout).not.toContain('--char-offset');
+	const search = run_cli(['search', '--help']);
+	expect(search.stdout).toContain('message (default)');
+	expect(search.stdout).not.toContain('--pi-root');
+	const read = run_cli(['read', '--help']);
+	expect(read.stdout).toContain('--char-offset');
+	expect(read.stdout).not.toContain('--agent');
+	expect(run_cli(['--help']).stdout).not.toContain('guide');
 });
