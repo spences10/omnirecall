@@ -12,13 +12,15 @@
 		"test": "pnpm build && vp test",
 		"test:watch": "pnpm build && vp test watch",
 		"changeset": "changeset",
-		"version": "changeset version",
+		"version": "changeset version && pnpm preview:generate",
 		"release": "pnpm verify && changeset publish",
 		"test:package": "node tools/smoke-package.ts",
-		"verify": "pnpm check && pnpm test && pnpm test:package"
+		"verify": "pnpm check && pnpm test && pnpm test:package",
+		"preview:generate": "pnpm build && node tools/generate-preview.ts"
 	},
 	"devDependencies": {
 		"@changesets/cli": "catalog:",
+		"@resvg/resvg-js": "catalog:",
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
 		"vite-plus": "catalog:",
