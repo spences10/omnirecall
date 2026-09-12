@@ -24,6 +24,7 @@ import {
 	type Source,
 } from '../../../packages/core/src/types.ts';
 import { database_path } from './paths.ts';
+import { guide } from './guide.ts';
 import { sync_progress } from './progress.ts';
 import { sync_summary } from './sync-output.ts';
 import { automatic_sources } from './sources.ts';
@@ -32,6 +33,7 @@ const package_metadata = JSON.parse(
 	readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ) as { name: string; version: string };
 const capabilities = [
+	'guide',
 	'sources',
 	'sync',
 	'search',
@@ -58,11 +60,13 @@ const info = defineCommand({
 			version: package_metadata.version,
 			status: 'preview',
 			capabilities,
+			agent_instructions:
+				'Run omnirecall guide before retrieving session evidence.',
 		};
 		console.log(
 			args.json
 				? JSON.stringify(result)
-				: `${result.name} v${result.version}\nPreview: Pi, Claude Code and Codex session evidence; durable local archive.`,
+				: `${result.name} v${result.version}\nPreview: Pi, Claude Code and Codex session evidence; durable local archive.\n${result.agent_instructions}`,
 		);
 	},
 });
@@ -97,11 +101,24 @@ function date_filter(value: unknown): string | undefined {
 	return new Date(parsed).toISOString();
 }
 
+const descriptions: Record<string, string> = {
+	sources:
+		'Inspect archive coverage and last sync times; run guide for the LLM workflow',
+	sync: 'Import session evidence; inspect partial status and issue_counts before retrieval',
+	search:
+		'Find evidence with short ANDed terms; run guide for query refinement and verification',
+	recall:
+		'Search with bounded context; use --compact --json for LLM retrieval',
+	sessions:
+		'List session metadata and IDs for scoped searches and raw-record navigation',
+	read: 'Expand an exact ref and verify context; follow next_char_offset for truncated content',
+};
+
 function command(name: string) {
 	return defineCommand({
 		meta: {
 			name,
-			description: `${name} archived coding-agent sessions (automatic discovery or explicit roots)`,
+			description: descriptions[name],
 		},
 		args: {
 			json: { type: 'boolean', description: 'Machine-readable JSON' },
@@ -121,7 +138,7 @@ function command(name: string) {
 			'char-offset': {
 				type: 'string',
 				description:
-					'Read: Unicode character offset within the selected message',
+					'Read: Unicode offset within a part/raw record; use next_char_offset to continue',
 			},
 			chars: {
 				type: 'string',
@@ -132,11 +149,14 @@ function command(name: string) {
 				type: 'positional',
 				required: false,
 				description:
-					'Plain-text query, or exact message ref for read',
+					name === 'read'
+						? 'Exact ref copied from search or sessions'
+						: 'Short terms ANDed within one part; no OR/phrase/prefix syntax (see guide)',
 			},
 			db: {
 				type: 'string',
-				description: 'Omni Recall database path',
+				description:
+					'Archive path; use the same --db for sync and retrieval',
 			},
 			'pi-root': {
 				type: 'string',
@@ -148,7 +168,8 @@ function command(name: string) {
 			},
 			raw: {
 				type: 'boolean',
-				description: 'Read: page through the original JSON record',
+				description:
+					'Read: original JSON fragments; no --context; follow next_char_offset or previous_ref/next_ref',
 			},
 			kind: {
 				type: 'string',
@@ -161,7 +182,8 @@ function command(name: string) {
 			},
 			agent: {
 				type: 'string',
-				description: 'Transcript source: pi, codex, or claude',
+				description:
+					'Authoring agent: pi, codex, or claude (not the caller)',
 			},
 			source: {
 				type: 'string',
@@ -173,7 +195,7 @@ function command(name: string) {
 			},
 			session: {
 				type: 'string',
-				description: 'Exact source-qualified session ID',
+				description: 'Exact session_id copied from sessions output',
 			},
 			after: {
 				type: 'string',
@@ -186,7 +208,7 @@ function command(name: string) {
 			'include-history': {
 				type: 'boolean',
 				description:
-					'Include superseded revisions and abandoned branches/turns',
+					'Include superseded revisions and abandoned branches/turns; not current work',
 			},
 			limit: {
 				type: 'string',
@@ -195,7 +217,8 @@ function command(name: string) {
 			},
 			offset: {
 				type: 'string',
-				description: 'Result offset, 0–1000000',
+				description:
+					'Result offset, 0–1000000; use next_offset with the same query/filters',
 			},
 			context: {
 				type: 'string',
@@ -205,7 +228,7 @@ function command(name: string) {
 			'max-bytes': {
 				type: 'string',
 				description:
-					'JSON budget, 1024–1048576 (compact default 8192; detailed 65536)',
+					'JSON bytes, 1024–1048576 (defaults 8192 compact/65536 detailed); on output_budget_exceeded, increase or reduce requested content',
 			},
 		},
 		async run({ args }) {
@@ -568,10 +591,11 @@ export const main = defineCommand({
 		name: package_metadata.name,
 		version: package_metadata.version,
 		description:
-			'Recall coding-agent conversations from a durable local archive',
+			'Retrieve historical evidence for coding assistants. Start with: omnirecall guide',
 	},
 	subCommands: {
 		info,
+		guide,
 		sources: command('sources'),
 		sync: command('sync'),
 		search: command('search'),

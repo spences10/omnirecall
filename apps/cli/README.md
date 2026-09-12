@@ -4,7 +4,16 @@ Search a durable local archive of Pi, Codex, and Claude Code session
 evidence. This working-tree preview preserves original JSON alongside
 searchable dialogue, reasoning, tool calls/results, and summaries.
 
+For LLM callers, start with `pnpx omnirecall guide` (or
+`guide --json`). The bundled guide teaches coverage checks, keyword
+refinement, filters, pagination, context expansion, and evidence
+verification. The model turns the user's question into short search
+queries and answers from the retrieved evidence. Run
+`node apps/cli/dist/index.js guide` after building this unreleased
+checkout.
+
 ```bash
+pnpx omnirecall guide
 pnpx omnirecall sync
 # Optional explicit locations:
 pnpx omnirecall sync --pi-root /path/to/pi/sessions \

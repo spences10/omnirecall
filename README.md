@@ -10,6 +10,30 @@ initial Claude Code transcript adapter. These changes are not yet
 released. The published npm scaffold does not include this complete
 workflow.
 
+## For coding assistants
+
+Start with `pnpx omnirecall guide` for the retrieval workflow. In this
+unreleased checkout, build first and run
+`node apps/cli/dist/index.js guide`. The guide is bundled with the
+CLI; `guide --json` returns the same instructions in a JSON envelope.
+
+The model interprets the user's question and searches with short
+terms, then reads selected references and verifies the evidence before
+answering. For example, “why did we choose SQLite?” may become
+searches for `sqlite`, `sqlite chose`, and `sqlite postgres`. Terms
+are ANDed within one part; try alternatives in separate searches.
+Start with `--kind message` for discussions and use
+`--kind tool_result` to corroborate recorded actions. Check source
+coverage and freshness, broaden filters when needed, and follow
+pagination before treating a first page as the complete results.
+
+An instruction for your coding assistant:
+
+> For questions about earlier coding sessions, use omnirecall. Read
+> `pnpx omnirecall guide` first, then search and read evidence with
+> `--json`. Cite the source agent, project, date, and exact reference;
+> distinguish historical claims and examples from verified actions.
+
 ## Development
 
 Requires Node.js 24.11+ and pnpm 12.3.4.

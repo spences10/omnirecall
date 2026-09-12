@@ -351,6 +351,7 @@ describe('built CLI', () => {
 			version: package_metadata.version,
 			status: 'preview',
 			capabilities: [
+				'guide',
 				'sources',
 				'sync',
 				'search',
@@ -358,6 +359,8 @@ describe('built CLI', () => {
 				'sessions',
 				'read',
 			],
+			agent_instructions:
+				'Run omnirecall guide before retrieving session evidence.',
 		});
 	});
 
