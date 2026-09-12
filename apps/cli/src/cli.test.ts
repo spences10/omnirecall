@@ -322,6 +322,11 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 	}
 });
 
+// Node 24.11 emits this runtime warning when node:sqlite is imported.
+// Accept that warning only; application diagnostics must still fail these checks.
+const clean_stderr =
+	/^(?:\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n)?$/;
+
 describe('built CLI', () => {
 	test.each([{ args: [] }, { args: ['--help'] }])(
 		'shows help for $args',
@@ -330,7 +335,7 @@ describe('built CLI', () => {
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain('omnirecall');
 			expect(result.stdout).toContain('info');
-			expect(result.stderr).toBe('');
+			expect(result.stderr).toMatch(clean_stderr);
 		},
 	);
 
@@ -338,13 +343,13 @@ describe('built CLI', () => {
 		const result = run_cli(['--version']);
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain(package_metadata.version);
-		expect(result.stderr).toBe('');
+		expect(result.stderr).toMatch(clean_stderr);
 	});
 
 	test('returns clean JSON with implemented preview capabilities', () => {
 		const result = run_cli(['info', '--json']);
 		expect(result.status).toBe(0);
-		expect(result.stderr).toBe('');
+		expect(result.stderr).toMatch(clean_stderr);
 		expect(JSON.parse(result.stdout)).toEqual({
 			schema_version: 1,
 			name: package_metadata.name,
