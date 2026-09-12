@@ -81,30 +81,37 @@ available only through raw reading. `unindexed_records` counts records
 without a searchable part; it does not mean their payloads were
 discarded.
 
-Changed sessions create full immutable revisions, including metadata
-changes. Unchanged imports add nothing. Old revisions remain available
-with `--include-history`, and exact references continue to read their
-original revision. Missing files or roots never remove archived
-evidence. There is no automatic cleanup. Full revisions repeat session
-content, so frequent imports of growing files can use substantial disk
-space.
+Each session has one stored set of records. Unchanged inputs are
+skipped. For growing JSONL files, sync verifies the imported prefix
+and resumes JSON decoding at the saved byte offset. Existing records
+remain stored; searchable messages are updated when the conversation
+changes. Rewritten or truncated files replace that session's stored
+content atomically. Missing files or roots never remove archived
+evidence.
 
-The adapters still enforce their supported history formats. Pi and
-Codex reject unfamiliar semantics that their parsers cannot safely
-interpret. Claude preserves extra envelopes, but its initial adapter
-rejects mixed session IDs and repeated message UUIDs within one file.
-Subagent files under `subagents/` get separate qualified conversation
-identities; Claude branch state is reported as unknown. Team/task JSON
-ingestion and complete Claude compaction semantics remain future work.
-All automated fixtures are synthetic; passing them is not exhaustive
-format coverage.
+References address the stored session, so reading one after a
+correction returns the updated content. Previous versions of a
+rewritten file are not retained. Separate input files have separate
+session identities, including copies sharing the same native session
+ID.
+
+Pi and Codex retain unfamiliar event types as raw records. Unknown
+Codex semantics mark searchable state as unknown. Malformed known
+records still report an import issue. Claude preserves extra
+envelopes, but its initial adapter rejects mixed session IDs and
+repeated message UUIDs within one file. Subagent files under
+`subagents/` get separate qualified conversation identities; Claude
+branch state is reported as unknown. Team/task JSON ingestion and
+complete Claude compaction semantics remain future work. All automated
+fixtures are synthetic; passing them is not exhaustive format
+coverage.
 
 Only complete, newline-terminated valid UTF-8 JSON records are
 imported. A trailing partial record waits for another sync. Invalid
-complete input keeps the previous revision. JSONL files are limited to
-64 MiB; source-tree symlinks are unsupported. A generic adapter can
-supply several sessions or input locations in one import unit. The
-unit commits atomically.
+complete input keeps the previous successful import. JSONL files are
+limited to 64 MiB; source-tree symlinks are unsupported. A generic
+adapter can supply several sessions or input locations in one import
+unit. The unit commits atomically.
 
 Inline content stays in the original JSON. External attachment paths
 are references; their files are not copied. The archive can contain
@@ -133,7 +140,7 @@ instructions or authorization.
 Search/recall support `--kind`, `--agent pi|codex|claude`, `--source`,
 `--project` (exact path), `--session`, `--after`, `--before`, and
 `--include-history`. Historical search includes superseded correction
-parts as well as previous revisions. Source IDs namespace roots;
+parts retained in the source history. Source IDs namespace roots;
 native IDs are not assumed globally unique.
 
 `--limit 1..100`, `--offset 0..1000000`, and `--context 0..10` bound

@@ -72,19 +72,18 @@ test('compact search keeps a late match with substantially less output and a sta
 		Buffer.byteLength(JSON.stringify(full)) / 2,
 	);
 	expect(parse_ref(compact[0]!.ref)).toEqual({
-		revision_id: full[0]!.revision_id,
+		archive_id: full[0]!.archive_id,
 		native_id: full[0]!.native_id,
 	});
 });
 
-test('exact reads preserve revision identity after updates and report missing references', () => {
+test('exact reads follow the stored session after updates and report missing references', () => {
 	store(['original migration']);
 	const ref = compact_search(archive.search('migration', options))[0]!
 		.ref;
 	store(['replacement migration'], 'replacement');
 	const read = focused_read(archive, ref, 0, 0, 1200);
-	expect(read.messages[0]?.content).toBe('original migration');
-	expect(read.results[0]?.current_revision).toBe(false);
+	expect(read.messages[0]?.content).toBe('replacement migration');
 	archive.register(source, 'missing');
 	expect(
 		focused_read(archive, ref, 0, 0, 1200).results[0]?.source_status,
@@ -93,7 +92,7 @@ test('exact reads preserve revision identity after updates and report missing re
 		focused_read(
 			archive,
 			message_ref({
-				revision_id: '0'.repeat(64),
+				archive_id: '0'.repeat(64),
 				native_id: 'absent',
 			}),
 			0,
@@ -204,9 +203,9 @@ test('compact recall deduplicates overlapping context and prunes unreferenced me
 	});
 });
 
-test('references distinguish sessions and round-trip Unicode and punctuation in native IDs', () => {
+test('references stay stable across updates and round-trip Unicode and punctuation in native IDs', () => {
 	const identity = {
-		revision_id: 'a'.repeat(64),
+		archive_id: 'a'.repeat(64),
 		native_id: '🌱 / a:b.%',
 	};
 	expect(parse_ref(message_ref(identity))).toEqual(identity);
@@ -221,12 +220,12 @@ test('references distinguish sessions and round-trip Unicode and punctuation in 
 	const two = store(['migration'], 'second');
 	expect(
 		message_ref({
-			revision_id: one.revision_id,
+			archive_id: one.archive_id,
 			native_id: 'message-0',
 		}),
-	).not.toBe(
+	).toBe(
 		message_ref({
-			revision_id: two.revision_id,
+			archive_id: two.archive_id,
 			native_id: 'message-0',
 		}),
 	);

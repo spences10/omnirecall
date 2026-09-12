@@ -54,7 +54,12 @@ export interface ImportInput {
 	byte_offset: number;
 	partial: boolean;
 }
+export interface ResumeInput {
+	input: ImportInput;
+	records(): RecordLine[];
+}
 export interface ImportResult {
+	append?: boolean;
 	sessions: Transcript[];
 	inputs: ImportInput[];
 }
@@ -62,7 +67,10 @@ export interface Adapter {
 	parser_version: number;
 	agent: Agent;
 	discover(root: string): Promise<ImportUnit[]>;
-	read(unit: ImportUnit): Promise<ImportResult>;
+	read(
+		unit: ImportUnit,
+		previous?: ResumeInput,
+	): Promise<ImportResult>;
 	// Opt in only when this token covers all inputs affecting read(), including interpretation.
 	fingerprint?(unit: ImportUnit): Promise<string | undefined>;
 	titles?(root: string): Promise<Map<string, string>>;
@@ -115,6 +123,7 @@ export function date(value: unknown): string {
 export function dialogue(
 	value: unknown,
 	omitted_types: readonly string[] = [],
+	allow_unknown = false,
 ): string {
 	if (typeof value === 'string') return value;
 	if (!Array.isArray(value))
@@ -125,7 +134,7 @@ export function dialogue(
 			if (block.type !== 'text') {
 				if (
 					typeof block.type === 'string' &&
-					omitted_types.includes(block.type)
+					(allow_unknown || omitted_types.includes(block.type))
 				)
 					return [];
 				throw new InputError(

@@ -53,6 +53,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		messages: [],
 		unindexed_records: 0,
 	};
+	let unknown_state = false;
 	const turns: { id: string; active: boolean }[] = [];
 	const messages = new Map<string, Message>();
 	let current_turn: string | null = null;
@@ -94,11 +95,11 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				'web_search_call',
 				'local_shell_call',
 			].includes(String(payload.type))
-		)
-			throw new InputError(
-				'unsupported',
-				'Unknown Codex response item',
-			);
+		) {
+			unknown_state = true;
+			result.unindexed_records++;
+			continue;
+		}
 		if (entry.type === 'realtime_item') {
 			if (
 				typeof payload.type === 'string' &&
@@ -107,11 +108,11 @@ export function parse_codex(records: RecordLine[]): Transcript {
 					'transcript_segment',
 					'realtime_session_closed',
 				].includes(payload.type)
-			)
-				throw new InputError(
-					'unsupported',
-					`Codex record at byte ${byte_offset}: Unknown realtime item type`,
-				);
+			) {
+				unknown_state = true;
+				result.unindexed_records++;
+				continue;
+			}
 			validate_source(
 				codex_realtime_schema,
 				payload,
@@ -137,11 +138,11 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			result.unindexed_records++;
 			continue;
 		}
-		if (entry.type !== 'event_msg')
-			throw new InputError(
-				'unsupported',
-				'Unknown Codex record type',
-			);
+		if (entry.type !== 'event_msg') {
+			unknown_state = true;
+			result.unindexed_records++;
+			continue;
+		}
 		if (payload.type === 'task_started') {
 			current_turn = text(payload.turn_id);
 			ensure_turn(current_turn);
@@ -191,11 +192,11 @@ export function parse_codex(records: RecordLine[]): Transcript {
 						'Extension',
 						'ContextCompaction',
 					].includes(item_type)
-				)
-					throw new InputError(
-						'unsupported',
-						'Unknown Codex completed item',
-					);
+				) {
+					unknown_state = true;
+					result.unindexed_records++;
+					continue;
+				}
 				result.unindexed_records++;
 				continue;
 			}
@@ -217,7 +218,20 @@ export function parse_codex(records: RecordLine[]): Transcript {
 					'Dialogue without a turn ID',
 				);
 			ensure_turn(turn_id);
-			const content = codex_dialogue(item, byte_offset);
+			let content: string;
+			try {
+				content = codex_dialogue(item, byte_offset);
+			} catch (error) {
+				if (
+					error instanceof InputError &&
+					error.code === 'unsupported'
+				) {
+					unknown_state = true;
+					result.unindexed_records++;
+					continue;
+				}
+				throw error;
+			}
 			const id = text(item.id);
 			const previous = messages.get(id);
 			const role = item_type === 'UserMessage' ? 'user' : 'assistant';
@@ -256,14 +270,26 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			].includes(String(payload.type))
 		) {
 			result.unindexed_records++;
-		} else
-			throw new InputError('unsupported', 'Unknown Codex event type');
+		} else {
+			unknown_state = true;
+			result.unindexed_records++;
+			continue;
+		}
 	}
 	result.messages = [...messages.values()];
 	result.inactive_turns = turns
 		.filter((t) => !t.active)
 		.map((t) => t.id);
-	return preserve_records(records, result, 'codex');
+	const preserved = preserve_records(records, result, 'codex');
+	if (unknown_state)
+		for (const message of [
+			...preserved.messages,
+			...(preserved.parts ?? []),
+		]) {
+			message.state = 'unknown';
+			message.active = true;
+		}
+	return preserved;
 }
 
 export async function session_titles(

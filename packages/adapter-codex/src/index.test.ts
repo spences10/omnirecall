@@ -31,7 +31,7 @@ test('indexes only completed dialogue, not response mirrors/reasoning/compacted 
 	);
 });
 
-test('omits known user attachments and references but rejects unknown content', () => {
+test('omits known user attachments and references and preserves unknown content', () => {
 	function with_content(content: unknown[]) {
 		return parse([
 			...codex_records(),
@@ -56,8 +56,8 @@ test('omits known user attachments and references but rejects unknown content', 
 		{ type: 'future', text: 'lost' },
 		{ type: 'thinking', thinking: 'hidden' },
 	])
-		expect(() => with_content([block])).toThrow(
-			'Unknown dialogue content block type',
+		expect(with_content([block]).records?.at(-1)?.raw_json).toContain(
+			JSON.stringify(block),
 		);
 });
 
@@ -98,8 +98,6 @@ test.each([
 		type: 'thread_rolled_back',
 		num_turns: -1,
 	}),
-	codex_entry('future', {}),
-	codex_entry('event_msg', { type: 'future' }),
 	codex_item('a1', 'UserMessage', 'role correction is ambiguous'),
 ])('rejects unsupported updates (%j)', (record) => {
 	expect(() => parse([...codex_records(), record])).toThrow();
@@ -179,7 +177,7 @@ test.each(['AgentMessage', 'UserMessage'])(
 	},
 );
 
-test('missing block discriminators are invalid and unknown assistant block types are unsupported', () => {
+test('missing block discriminators are invalid and unknown assistant block types are preserved', () => {
 	expect(() =>
 		parse([
 			...codex_records(),
@@ -207,7 +205,7 @@ test('missing block discriminators are invalid and unknown assistant block types
 				},
 			}),
 		]),
-	).toThrow('Unknown dialogue content block type');
+	).not.toThrow();
 });
 
 // Sanitized shapes observed in Codex paginated histories: no coding turn is required.
@@ -283,11 +281,25 @@ test.each([
 	},
 );
 
-test('unknown realtime variants remain explicitly unsupported', () => {
+test('unknown realtime variants are preserved', () => {
 	expect(() =>
 		parse([
 			codex_records()[0]!,
 			codex_entry('realtime_item', { type: 'future_realtime' }),
 		]),
-	).toThrow('Unknown realtime item type');
+	).not.toThrow();
 });
+
+test.each(['future', 'response_item', 'event_msg'])(
+	'preserves unfamiliar %s records with unknown message state',
+	(type) => {
+		const record = codex_entry(type, { type: 'future' });
+		const result = parse([...codex_records(), record]);
+		expect(result.records?.at(-1)?.raw_json).toBe(
+			JSON.stringify(record),
+		);
+		expect(result.messages.every((m) => m.state === 'unknown')).toBe(
+			true,
+		);
+	},
+);

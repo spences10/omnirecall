@@ -24,6 +24,7 @@ import {
 	jsonl,
 	pi_entry,
 	pi_records,
+	timestamp,
 } from './fixtures.ts';
 import { sync } from './sync.ts';
 import { type Adapter, type Source } from './types.ts';
@@ -61,7 +62,7 @@ test('cross-agent archive, source-qualified collisions, equal timestamps, contex
 	);
 	const result = await sync(archive, sources, adapters);
 	expect(result.status).toBe('ok');
-	expect(result.revisions_added).toBe(2);
+	expect(result.sessions_updated).toBe(2);
 	const matches = archive.search('café migrations', options);
 	expect(matches).toHaveLength(2);
 	expect(new Set(matches.map((match) => match.session_id)).size).toBe(
@@ -69,7 +70,7 @@ test('cross-agent archive, source-qualified collisions, equal timestamps, contex
 	);
 	for (const match of matches) {
 		const context = archive.context(
-			match.revision_id,
+			match.archive_id,
 			match.native_id,
 			2,
 		);
@@ -121,7 +122,7 @@ test('cross-agent archive, source-qualified collisions, equal timestamps, contex
 		}),
 	).toEqual([]);
 	expect(
-		(await sync(archive, sources, adapters)).revisions_added,
+		(await sync(archive, sources, adapters)).sessions_updated,
 	).toBe(0);
 	expect(
 		inspection.prepare('SELECT * FROM parts').all(),
@@ -193,7 +194,7 @@ test('Codex sidecar titles create an immutable metadata revision', async () => {
 	const original = readFileSync(index);
 	const result = await sync(archive, sources, adapters);
 	expect(result.status).toBe('ok');
-	expect(result.revisions_added).toBe(1);
+	expect(result.sessions_updated).toBe(1);
 	expect(
 		archive.search('migrations', { ...options, agent: 'codex' })[0]
 			?.title,
@@ -249,11 +250,11 @@ test('complete UTF-8 checkpoints survive partial writes and invalid complete lin
 	appendFileSync(path_for('pi'), record.subarray(0, split));
 	const result = await sync(archive, sources, adapters);
 	expect(result.partial_files).toBe(1);
-	expect(result.revisions_added).toBe(0);
+	expect(result.sessions_updated).toBe(0);
 	expect(archive.search('Résumé', options)).toEqual([]);
 	appendFileSync(path_for('pi'), record.subarray(split));
 	expect(
-		(await sync(archive, sources, adapters)).revisions_added,
+		(await sync(archive, sources, adapters)).sessions_updated,
 	).toBe(1);
 	expect(archive.search('Résumé', options)).toHaveLength(1);
 	const checkpoint = inspection
@@ -272,59 +273,36 @@ test('complete UTF-8 checkpoints survive partial writes and invalid complete lin
 });
 
 test.each(['pi', 'codex'])(
-	'%s unknown content rejects the update and preserves archived dialogue and checkpoint',
+	'%s unknown events remain archived',
 	async (agent) => {
 		await sync(archive, sources, adapters);
-		const checkpoint = inspection
-			.prepare(
-				'SELECT revision_id, byte_offset FROM resources WHERE path=?',
-			)
-			.get(path_for(agent));
-		const content = [
-			{ type: 'text', text: 'uncommitted keyword' },
-			{
-				type: 'future_dialogue',
-				text: 'evidence must not disappear',
-			},
-		];
 		const entry =
 			agent === 'pi'
-				? pi_entry('future', 'u2', 'assistant', content)
-				: codex_entry('event_msg', {
-						type: 'item_completed',
-						turn_id: 'turn-1',
-						item: { id: 'future', type: 'AgentMessage', content },
-					});
+				? { type: 'future', id: 'future', parentId: 'u2', timestamp }
+				: codex_entry('future', {});
 		appendFileSync(path_for(agent), jsonl([entry]));
-		const result = await sync(archive, sources, adapters);
-		expect(result).toMatchObject({
-			status: 'partial',
-			failures: 1,
-			files_indexed: 1,
-			revisions_added: 0,
+		expect(await sync(archive, sources, adapters)).toMatchObject({
+			status: 'ok',
+			failures: 0,
+			sessions_updated: 1,
 		});
-		expect(result.issues[0]).toMatchObject({
-			path: path_for(agent),
-			code: 'unsupported',
-		});
-		expect(archive.search('uncommitted', options)).toEqual([]);
-		expect(archive.search('migrations', options)).toHaveLength(2);
 		expect(
 			inspection
 				.prepare(
-					'SELECT revision_id, byte_offset FROM resources WHERE path=?',
+					"SELECT raw_json FROM records WHERE native_type='future'",
 				)
-				.get(path_for(agent)),
-		).toEqual(checkpoint);
+				.all(),
+		).toHaveLength(1);
+		expect(archive.search('migrations', options)).toHaveLength(2);
 	},
 );
 
-test('file transaction rolls back FTS, revision selection and checkpoint', async () => {
+test('file transaction rolls back FTS, session writes and checkpoint', async () => {
 	await sync(archive, sources, adapters);
-	const before = inspection.prepare('SELECT * FROM revisions').all();
+	const before = inspection.prepare('SELECT * FROM sessions').all();
 	const checkpoint = inspection
 		.prepare(
-			'SELECT revision_id,byte_offset FROM resources WHERE path=?',
+			'SELECT archive_id,byte_offset FROM resources WHERE path=?',
 		)
 		.get(path_for('pi'));
 	appendFileSync(
@@ -335,56 +313,39 @@ test('file transaction rolls back FTS, revision selection and checkpoint', async
 		"CREATE TRIGGER fail_message BEFORE INSERT ON parts BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;",
 	);
 	expect((await sync(archive, sources, adapters)).failures).toBe(1);
-	expect(inspection.prepare('SELECT * FROM revisions').all()).toEqual(
+	expect(inspection.prepare('SELECT * FROM sessions').all()).toEqual(
 		before,
 	);
 	expect(
 		inspection
 			.prepare(
-				'SELECT revision_id,byte_offset FROM resources WHERE path=?',
+				'SELECT archive_id,byte_offset FROM resources WHERE path=?',
 			)
 			.get(path_for('pi')),
 	).toEqual(checkpoint);
 	expect(archive.search('transaction', options)).toEqual([]);
 	inspection.exec('DROP TRIGGER fail_message');
 	expect(
-		(await sync(archive, sources, adapters)).revisions_added,
+		(await sync(archive, sources, adapters)).sessions_updated,
 	).toBe(1);
 });
 
-test('movement, replacement, deletion and unavailable roots never delete archived history', async () => {
+test('missing files and unavailable roots retain searchable sessions', async () => {
 	await sync(archive, sources, adapters);
-	const moved = join(root, 'pi', 'archived.jsonl');
-	renameSync(path_for('pi'), moved);
-	expect(
-		(await sync(archive, sources, adapters)).revisions_added,
-	).toBe(0);
+	rmSync(path_for('pi'));
+	await sync(archive, sources, adapters);
 	expect(
 		archive.search('migrations', { ...options, agent: 'pi' })[0]
-			?.source_path,
-	).toBe(moved);
-	writeFileSync(moved, jsonl(pi_records('replacement')));
-	await sync(archive, sources, adapters);
-	expect(
-		archive.search('migrations', { ...options, agent: 'pi' }),
-	).toHaveLength(2);
-	rmSync(moved);
-	await sync(archive, sources, adapters);
-	expect(
-		archive.search('migrations', { ...options, agent: 'pi' }),
-	).toHaveLength(2);
+			?.path_status,
+	).toBe('missing');
 	renameSync(join(root, 'codex'), join(root, 'offline'));
-	const result = await sync(archive, sources, adapters);
-	expect(result.issues[0]?.code).toBe('missing');
+	expect(
+		(await sync(archive, sources, adapters)).issues[0]?.code,
+	).toBe('missing');
 	expect(
 		archive.search('migrations', { ...options, agent: 'codex' })[0]
 			?.source_status,
 	).toBe('missing');
-	expect(
-		inspection
-			.prepare('SELECT status FROM resources WHERE path=?')
-			.get(path_for('codex'))?.status,
-	).toBe('available');
 });
 
 test('blocked discovery retains known paths and reports access failure', async () => {
@@ -451,7 +412,7 @@ test('Pi branch context follows parents, never chronological siblings', async ()
 	const match = archive.search('Alternative', options)[0]!;
 	expect(
 		archive
-			.context(match.revision_id, 'branch', 10)
+			.context(match.archive_id, 'branch', 10)
 			.before.map((row) => row.native_id),
 	).toEqual(['u1']);
 	const historical = archive.search('migrations', {
@@ -463,12 +424,12 @@ test('Pi branch context follows parents, never chronological siblings', async ()
 	for (const row of historical)
 		expect(
 			archive
-				.context(row.revision_id, 'a1', 10)
+				.context(row.archive_id, 'a1', 10)
 				.after.map((entry) => entry.native_id),
 		).not.toContain('branch');
 });
 
-test('Codex rollback and item correction preserve old revisions without linearizing abandoned turns', async () => {
+test('Codex rollback and item correction update stored messages without linearizing abandoned turns', async () => {
 	await sync(archive, sources, adapters);
 	appendFileSync(
 		path_for('codex'),
@@ -502,7 +463,7 @@ test('Codex rollback and item correction preserve old revisions without lineariz
 	const match = archive.search('corrected', options)[0]!;
 	expect(
 		archive
-			.context(match.revision_id, 'new-answer', 10)
+			.context(match.archive_id, 'new-answer', 10)
 			.before.map((row) => row.native_id),
 	).toEqual(['new-user']);
 	appendFileSync(
@@ -523,18 +484,18 @@ test('Codex rollback and item correction preserve old revisions without lineariz
 			...options,
 			include_history: true,
 		}),
-	).toHaveLength(2);
+	).toHaveLength(1);
 	expect(archive.search('revised', options)).toHaveLength(1);
 });
 
-test('same-size rewrites and truncation create revisions; divergent duplicate files are rejected', async () => {
+test('rewrites replace stored content; separate files remain separate sessions', async () => {
 	await sync(archive, sources, adapters);
 	writeFileSync(
 		path_for('pi'),
 		jsonl(pi_records()).replace('safely', 'surely'),
 	);
 	expect(
-		(await sync(archive, sources, adapters)).revisions_added,
+		(await sync(archive, sources, adapters)).sessions_updated,
 	).toBe(1);
 	expect(
 		archive.search('safely', { ...options, agent: 'pi' }),
@@ -545,7 +506,7 @@ test('same-size rewrites and truncation create revisions; divergent duplicate fi
 			agent: 'pi',
 			include_history: true,
 		}),
-	).toHaveLength(1);
+	).toHaveLength(0);
 	writeFileSync(
 		join(root, 'pi', 'duplicate.jsonl'),
 		jsonl(pi_records()),
@@ -553,7 +514,7 @@ test('same-size rewrites and truncation create revisions; divergent duplicate fi
 	const result = await sync(archive, sources, adapters);
 	expect(
 		result.issues.filter((issue) => issue.code === 'conflict'),
-	).toHaveLength(2);
+	).toHaveLength(0);
 	expect(archive.search('surely', options)).toHaveLength(1);
 	rmSync(join(root, 'pi', 'duplicate.jsonl'));
 	writeFileSync(path_for('pi'), jsonl(pi_records().slice(0, 1)));
@@ -561,14 +522,14 @@ test('same-size rewrites and truncation create revisions; divergent duplicate fi
 	expect(archive.search('surely', options)).toHaveLength(0);
 	expect(
 		archive.search('surely', { ...options, include_history: true }),
-	).toHaveLength(1);
+	).toHaveLength(0);
 });
 
 test('invalid adapter output preserves the selected revision and checkpoint', async () => {
 	await sync(archive, sources, adapters);
 	const checkpoint = inspection
 		.prepare(
-			'SELECT revision_id, byte_offset FROM resources WHERE path=?',
+			'SELECT archive_id, byte_offset FROM resources WHERE path=?',
 		)
 		.get(path_for('pi'));
 	const malformed: Adapter = {
@@ -584,7 +545,7 @@ test('invalid adapter output preserves the selected revision and checkpoint', as
 		status: 'partial',
 		failures: 1,
 		operational_failures: 0,
-		revisions_added: 0,
+		sessions_updated: 0,
 	});
 	expect(result.issues[0]).toMatchObject({
 		code: 'invalid',
@@ -594,49 +555,28 @@ test('invalid adapter output preserves the selected revision and checkpoint', as
 	expect(
 		inspection
 			.prepare(
-				'SELECT revision_id, byte_offset FROM resources WHERE path=?',
+				'SELECT archive_id, byte_offset FROM resources WHERE path=?',
 			)
 			.get(path_for('pi')),
 	).toEqual(checkpoint);
 	expect(archive.search('migrations', options)).toHaveLength(2);
 });
 
-test('progress covers both passes and counts rejected inputs without indexing them', async () => {
+test('progress reports imports and failures in one pass', async () => {
 	writeFileSync(join(root, 'pi', 'broken.jsonl'), 'broken\n');
 	const events: import('./sync.ts').SyncProgress[] = [];
-	const result = await sync(
-		archive,
-		[sources[0]!],
-		adapters,
-		(event) => events.push(event),
+	const result = await sync(archive, [sources[0]!], adapters, (e) =>
+		events.push(e),
 	);
-	expect(events[0]).toMatchObject({
-		phase: 'discovering',
-		source_index: 1,
-		source_count: 1,
-	});
-	expect(events).toContainEqual(
-		expect.objectContaining({
-			phase: 'checking',
-			completed: 2,
-			total: 2,
-			failures: 1,
-		}),
-	);
-	expect(events).toContainEqual(
-		expect.objectContaining({
-			phase: 'importing',
-			completed: 0,
-			total: 1,
-		}),
-	);
+	expect(events[0]?.phase).toBe('discovering');
 	expect(events.at(-1)).toMatchObject({
 		phase: 'source_done',
-		completed: 1,
-		total: 1,
-		files_indexed: result.files_indexed,
-		failures: result.failures,
+		completed: 2,
+		total: 2,
+		files_indexed: 1,
+		failures: 1,
 	});
+	expect(result.failures).toBe(1);
 });
 
 test('parses once initially, persists the cache across reopen, and skips unchanged inputs', async () => {
@@ -647,7 +587,7 @@ test('parses once initially, persists the cache across reopen, and skips unchang
 	});
 	const first = await sync(archive, [sources[0]!], [counted]);
 	expect(first).toMatchObject({
-		revisions_added: 1,
+		sessions_updated: 1,
 		files_skipped: 0,
 	});
 	expect(parses).toBe(1);
@@ -655,7 +595,7 @@ test('parses once initially, persists the cache across reopen, and skips unchang
 	archive = new Archive(join(root, 'omnirecall.db'));
 	const second = await sync(archive, [sources[0]!], [counted]);
 	expect(second).toMatchObject({
-		revisions_added: 0,
+		sessions_updated: 0,
 		files_indexed: 1,
 		files_skipped: 1,
 	});
@@ -674,7 +614,7 @@ test('same-size rewrite with restored mtime invalidates the cache through ctime'
 	utimesSync(path, before.atime, before.mtime);
 	const result = await sync(archive, sources, adapters);
 	expect(result).toMatchObject({
-		revisions_added: 1,
+		sessions_updated: 1,
 		files_skipped: 1,
 	});
 	expect(archive.search('surely', options)).toHaveLength(1);
@@ -683,26 +623,39 @@ test('same-size rewrite with restored mtime invalidates the cache through ctime'
 	).toEqual([]);
 });
 
-test('new divergent copies conflict with cached identities on every subsequent sync', async () => {
+test('copies have stable independent identities across edits and disappearance', async () => {
 	await sync(archive, sources, adapters);
+	const copy = join(root, 'pi', 'copy.jsonl');
 	writeFileSync(
-		join(root, 'pi', 'copy.jsonl'),
+		copy,
 		jsonl(pi_records()).replace('safely', 'surely'),
 	);
-	for (let n = 0; n < 2; n++) {
-		const result = await sync(archive, [sources[0]!], adapters);
-		expect(result.issues.map((issue) => issue.code)).toEqual([
-			'conflict',
-			'conflict',
-		]);
-		expect(result.revisions_added).toBe(0);
-		expect(result.files_skipped).toBe(0);
-	}
-	expect(archive.search('surely', options)).toEqual([]);
-	rmSync(join(root, 'pi', 'copy.jsonl'));
+	await sync(archive, [sources[0]!], adapters);
+	const ids = archive
+		.sessions({ ...options, agent: 'pi' })
+		.map((s) => s.session_id)
+		.sort();
+	writeFileSync(
+		path_for('pi'),
+		jsonl(pi_records()).replace('safely', 'updated'),
+	);
+	await sync(archive, [sources[0]!], adapters);
+	expect(
+		archive
+			.sessions({ ...options, agent: 'pi' })
+			.map((s) => s.session_id)
+			.sort(),
+	).toEqual(ids);
+	expect(
+		archive.search('safely', { ...options, agent: 'pi' }),
+	).toEqual([]);
+	expect(archive.search('updated', options)).toHaveLength(1);
+	expect(archive.search('surely', options)).toHaveLength(1);
+	rmSync(copy);
 	expect(
 		(await sync(archive, [sources[0]!], adapters)).files_skipped,
 	).toBe(1);
+	expect(archive.search('surely', options)).toHaveLength(1);
 });
 
 test('parser version changes and corrupt acceleration data force a fresh parse', async () => {
@@ -714,7 +667,7 @@ test('parser version changes and corrupt acceleration data force a fresh parse',
 	await sync(archive, [sources[0]!], [counted]);
 	counted.parser_version++;
 	expect(
-		(await sync(archive, [sources[0]!], [counted])).revisions_added,
+		(await sync(archive, [sources[0]!], [counted])).sessions_updated,
 	).toBe(1);
 	expect(parses).toBe(2);
 	inspection.exec("UPDATE sync_cache SET data='broken'");
@@ -725,7 +678,7 @@ test('parser version changes and corrupt acceleration data force a fresh parse',
 });
 
 test.each([false, true])(
-	'a source changed after checking is rejected (cached=%s)',
+	'a source changed before reading is imported (cached=%s)',
 	async (cached) => {
 		if (cached) await sync(archive, [sources[0]!], adapters);
 		const result = await sync(
@@ -742,10 +695,10 @@ test.each([false, true])(
 					);
 			},
 		);
-		expect(result.issues[0]?.code).toBe('changed');
-		expect(result.revisions_added).toBe(0);
+		expect(result.issues).toEqual([]);
+		expect(result.sessions_updated).toBe(1);
 		expect(result.files_skipped).toBe(0);
-		expect(archive.search('uncommitted', options)).toEqual([]);
+		expect(archive.search('uncommitted', options)).toHaveLength(1);
 	},
 );
 
@@ -763,7 +716,7 @@ test('unfinished tails remain partial when cached and are imported when complete
 	appendFileSync(path_for('pi'), '\n');
 	expect(await sync(archive, [sources[0]!], adapters)).toMatchObject({
 		status: 'ok',
-		revisions_added: 1,
+		sessions_updated: 1,
 		files_skipped: 0,
 	});
 	expect(archive.search('completed', options)).toHaveLength(1);
@@ -783,4 +736,55 @@ test('incomplete development baselines are rejected without adding cache tables'
 		'CREATE TABLE sync_cache (source_id TEXT, unit_key TEXT, signature TEXT, data TEXT, PRIMARY KEY(source_id,unit_key))',
 	);
 	archive = new Archive(join(root, 'omnirecall.db'));
+});
+
+test('append stores only new raw records and leaves unchanged searchable rows untouched', async () => {
+	await sync(archive, [sources[0]!], adapters);
+	const before = inspection
+		.prepare(
+			'SELECT rowid,archive_id,record_key,raw_json FROM records ORDER BY source_order',
+		)
+		.all();
+	const first = archive.search('migrations', {
+		...options,
+		agent: 'pi',
+	})[0]!;
+	inspection.exec(`
+ CREATE TRIGGER no_raw_delete BEFORE DELETE ON records BEGIN SELECT RAISE(ABORT,'existing record deleted'); END;
+ CREATE TRIGGER no_raw_update BEFORE UPDATE ON records BEGIN SELECT RAISE(ABORT,'existing record updated'); END;
+ CREATE TRIGGER no_unchanged_part_update BEFORE UPDATE ON parts WHEN old.native_id='a1' BEGIN SELECT RAISE(ABORT,'unchanged part updated'); END;
+ `);
+	appendFileSync(
+		path_for('pi'),
+		jsonl([
+			pi_entry('new', 'u2', 'assistant', 'fresh incremental answer'),
+		]),
+	);
+	expect(await sync(archive, [sources[0]!], adapters)).toMatchObject({
+		failures: 0,
+		sessions_updated: 1,
+	});
+	const after = inspection
+		.prepare(
+			'SELECT rowid,archive_id,record_key,raw_json FROM records ORDER BY source_order',
+		)
+		.all();
+	expect(after.slice(0, before.length)).toEqual(before);
+	expect(after).toHaveLength(before.length + 1);
+	expect(
+		archive.search('migrations', { ...options, agent: 'pi' })[0]
+			?.rowid,
+	).toBe(first.rowid);
+	expect(archive.search('incremental', options)).toHaveLength(1);
+	expect(
+		inspection
+			.prepare(
+				"SELECT name FROM sqlite_schema WHERE name='revisions'",
+			)
+			.get(),
+	).toBeUndefined();
+	expect(await sync(archive, [sources[0]!], adapters)).toMatchObject({
+		files_skipped: 1,
+		sessions_updated: 0,
+	});
 });

@@ -207,8 +207,9 @@ output text matches.
 If a completed message item is later recorded with corrected content,
 retain both observations while letting ordinary retrieval select the
 appropriate current representation. If its turn is rolled back, retain
-the evidence with that state visible. The revision mechanism must make
-earlier references stable; its exact storage design is still open.
+the evidence with that state visible. The stored interpretation must
+make earlier references stable; its exact storage design is still
+open.
 
 ## Decisions this mapping supports
 

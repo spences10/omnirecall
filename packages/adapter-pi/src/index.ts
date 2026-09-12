@@ -72,11 +72,11 @@ export function parse_pi(records: RecordLine[]): Transcript {
 					'Pi message',
 					byte_offset,
 				);
-				const content = dialogue(message.content, [
-					'thinking',
-					'image',
-					'toolCall',
-				]);
+				const content = dialogue(
+					message.content,
+					['thinking', 'image', 'toolCall'],
+					true,
+				);
 				if (content.trim()) {
 					const normalized: Message = {
 						native_id: id,
@@ -91,19 +91,6 @@ export function parse_pi(records: RecordLine[]): Transcript {
 					result.messages.push(normalized);
 					ancestor = id;
 				}
-			} else if (
-				![
-					'toolResult',
-					'bashExecution',
-					'custom',
-					'branchSummary',
-					'compactionSummary',
-				].includes(String(message.role))
-			) {
-				throw new InputError(
-					'unsupported',
-					'Unknown Pi message role',
-				);
 			} else result.unindexed_records++;
 		} else if (entry.type === 'session_info') {
 			result.title = metadata(entry.name);
@@ -119,8 +106,7 @@ export function parse_pi(records: RecordLine[]): Transcript {
 			].includes(String(entry.type))
 		) {
 			result.unindexed_records++;
-		} else
-			throw new InputError('unsupported', 'Unknown Pi entry type');
+		} else result.unindexed_records++;
 		nearest_message.set(id, ancestor);
 	}
 	const active_ids = new Set<string>();

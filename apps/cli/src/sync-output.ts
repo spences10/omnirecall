@@ -26,7 +26,7 @@ export function sync_summary(
 		['Files scanned', result.files_scanned],
 		['Files processed', result.files_indexed - result.files_skipped],
 		['Files unchanged', result.files_skipped],
-		['Revisions added', result.revisions_added],
+		['Sessions updated', result.sessions_updated],
 	];
 	if (result.partial_files)
 		metrics.push(['Incomplete files', result.partial_files]);

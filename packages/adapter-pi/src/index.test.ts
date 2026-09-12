@@ -43,9 +43,7 @@ test('extracts named v3 dialogue and skips reasoning/tools/compaction materializ
 test.each([
 	[pi_entry('bad', 'absent', 'user', 'text')],
 	[pi_entry('u1', 'u2', 'user', 'duplicate')],
-	[{ type: 'future', id: 'future', parentId: 'u2', timestamp }],
-	[pi_entry('bad', 'u2', 'unknown-role', 'text')],
-])('rejects ambiguous trees/unknown semantics (%j)', (extra) => {
+])('rejects ambiguous trees (%j)', (extra) => {
 	expect(() => parse([...pi_records(), extra])).toThrow();
 });
 
@@ -65,11 +63,7 @@ test('omits known non-dialogue blocks and rejects unknown or missing block types
 	expect(
 		result.messages.slice(-2).map((message) => message.content),
 	).toEqual(['Visible answer', 'Visible question']);
-	for (const block of [
-		{ type: 'future', text: 'lost' },
-		{ text: 'lost' },
-		{ type: 'local_image', path: '/synthetic' },
-	])
+	for (const block of [{ text: 'lost' }])
 		expect(() =>
 			parse([
 				...pi_records(),
@@ -97,4 +91,27 @@ test('reports the byte and field for a malformed entry', () => {
 			{ ...pi_entry('bad', 'u2', 'user', 'hello'), parentId: 17 },
 		]),
 	).toThrow(/Pi record at byte .*invalid field parentId/);
+});
+
+test('preserves unknown event envelopes and extracts known text beside unknown blocks', () => {
+	const future = {
+		type: 'future',
+		id: 'future',
+		parentId: 'u2',
+		timestamp,
+	};
+	const result = parse([
+		...pi_records(),
+		future,
+		pi_entry('mixed', 'future', 'assistant', [
+			{ type: 'text', text: 'kept' },
+			{ type: 'future', data: 42 },
+		]),
+	]);
+	expect(
+		result.records?.some(
+			(r) => r.raw_json === JSON.stringify(future),
+		),
+	).toBe(true);
+	expect(result.messages.at(-1)?.content).toBe('kept');
 });

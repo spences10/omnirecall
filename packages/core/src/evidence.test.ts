@@ -288,17 +288,17 @@ test('core accepts multi-session, multi-input units without knowing JSONL and re
 		};
 		const source = source_config('synthetic', root);
 		expect(
-			(await sync(archive, [source], [adapter])).revisions_added,
+			(await sync(archive, [source], [adapter])).sessions_updated,
 		).toBe(2);
 		expect(
-			(await sync(archive, [source], [adapter])).revisions_added,
+			(await sync(archive, [source], [adapter])).sessions_updated,
 		).toBe(0);
 		expect(archive.search('migrations', options)).toHaveLength(2);
 		const inspect = new DatabaseSync(db);
 		try {
 			expect(
 				inspect
-					.prepare('SELECT count(*) AS n FROM revision_inputs')
+					.prepare('SELECT count(*) AS n FROM session_inputs')
 					.get()!.n,
 			).toBe(4);
 			expect(
@@ -327,7 +327,7 @@ test('core accepts multi-session, multi-input units without knowing JSONL and re
 		}
 	}));
 
-test('a failed multi-session unit rolls back all revisions and resource checkpoints', async () =>
+test('a failed multi-session unit rolls back all sessions and resource checkpoints', async () =>
 	fixture(async (root, archive, db) => {
 		const source = source_config('synthetic', root);
 		const adapter: Adapter = {
@@ -361,7 +361,7 @@ test('a failed multi-session unit rolls back all revisions and resource checkpoi
 				"CREATE TRIGGER fail_second BEFORE INSERT ON sessions WHEN new.native_id='two' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;",
 			);
 			const result = await sync(archive, [source], [adapter]);
-			expect(result.revisions_added).toBe(0);
+			expect(result.sessions_updated).toBe(0);
 			expect(archive.sessions(options)).toEqual([]);
 			expect(
 				inspect.prepare('SELECT byte_offset FROM resources').get()!
@@ -394,7 +394,7 @@ test('Codex realtime transcript evidence can be searched and read with exact pro
 				[source_config('codex', root)],
 				[codex_adapter],
 			),
-		).toMatchObject({ revisions_added: 1, failures: 0 });
+		).toMatchObject({ sessions_updated: 1, failures: 0 });
 		const hit = archive.search('realtime_unique', options)[0]!;
 		expect(hit).toMatchObject({
 			content: 'realtime_unique café reply',

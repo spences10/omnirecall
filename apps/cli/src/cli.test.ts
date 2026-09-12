@@ -84,7 +84,7 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 			'--json',
 		]);
 		expect(imported.status, imported.stdout).toBe(0);
-		expect(JSON.parse(imported.stdout).revisions_added).toBe(2);
+		expect(JSON.parse(imported.stdout).sessions_updated).toBe(2);
 		const recalled = run_cli([
 			'recall',
 			'café migrations',
@@ -554,7 +554,7 @@ test('plain sync discovers available histories, reuses custom sources and respec
 		expect(run.status, run.stdout + run.stderr).toBe(0);
 		expect(JSON.parse(run.stdout)).toMatchObject({
 			sources_selected: 2,
-			revisions_added: 2,
+			sessions_updated: 2,
 		});
 		const custom = join(home, 'custom');
 		mkdirSync(custom);
@@ -568,12 +568,12 @@ test('plain sync discovers available histories, reuses custom sources and respec
 		);
 		expect(JSON.parse(run.stdout)).toMatchObject({
 			sources_selected: 1,
-			revisions_added: 1,
+			sessions_updated: 1,
 		});
 		run = run_cli(['sync', '--db', db, '--json'], env);
 		expect(JSON.parse(run.stdout)).toMatchObject({
 			sources_selected: 3,
-			revisions_added: 0,
+			sessions_updated: 0,
 		});
 		run = run_cli(
 			['sync', '--agent', 'codex', '--db', db, '--json'],

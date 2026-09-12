@@ -47,7 +47,10 @@ export async function discover_jsonl(
 }
 
 // Read a bounded snapshot without decoding an unfinished UTF-8 record.
-export async function read_snapshot(path: string) {
+export async function read_snapshot(
+	path: string,
+	previous?: import('./types.ts').ResumeInput,
+) {
 	const handle = await open(
 		path,
 		constants.O_RDONLY | constants.O_NOFOLLOW,
@@ -59,22 +62,51 @@ export async function read_snapshot(path: string) {
 				'unsupported',
 				'Expected a regular file of at most 64 MiB',
 			);
-		const buffer = Buffer.alloc(before.size);
-		let offset = 0;
-		while (offset < buffer.length) {
-			const { bytesRead: bytes_read } = await handle.read(
-				buffer,
-				offset,
-				buffer.length - offset,
-				offset,
-			);
-			if (!bytes_read)
-				throw new InputError(
-					'changed',
-					'Source truncated during read; retry sync',
+		let start_offset = 0;
+		let hash = createHash('sha256');
+		async function read_into(buffer: Buffer, position: number) {
+			let offset = 0;
+			while (offset < buffer.length) {
+				const { bytesRead } = await handle.read(
+					buffer,
+					offset,
+					buffer.length - offset,
+					position + offset,
 				);
-			offset += bytes_read;
+				if (!bytesRead)
+					throw new InputError(
+						'changed',
+						'Source truncated during read; retry sync',
+					);
+				offset += bytesRead;
+			}
 		}
+		// Hash the imported prefix in bounded chunks, without decoding it again.
+		if (previous && previous.input.byte_offset <= before.size) {
+			const chunk = Buffer.alloc(
+				Math.min(previous.input.byte_offset, 1024 * 1024),
+			);
+			let position = 0;
+			while (position < previous.input.byte_offset) {
+				const part = chunk.subarray(
+					0,
+					Math.min(
+						chunk.length,
+						previous.input.byte_offset - position,
+					),
+				);
+				await read_into(part, position);
+				hash.update(part);
+				position += part.length;
+			}
+			if (hash.copy().digest('hex') === previous.input.hash)
+				start_offset = previous.input.byte_offset;
+			else hash = createHash('sha256');
+		}
+		const append = start_offset > 0;
+		const buffer = Buffer.alloc(before.size - start_offset);
+		await read_into(buffer, start_offset);
+
 		const after = await stat(path);
 		if (
 			before.dev !== after.dev ||
@@ -87,9 +119,12 @@ export async function read_snapshot(path: string) {
 				'changed',
 				'Source changed during read; retry sync',
 			);
-		const byte_offset = buffer.lastIndexOf(10) + 1;
-		const complete = buffer.subarray(0, byte_offset);
-		const records: RecordLine[] = [];
+		const complete_length = buffer.lastIndexOf(10) + 1;
+		const byte_offset = start_offset + complete_length;
+		const complete = buffer.subarray(0, complete_length);
+		hash.update(complete);
+
+		const records: RecordLine[] = append ? previous!.records() : [];
 		const decoder = new TextDecoder('utf-8', { fatal: true });
 		let start = 0;
 		while (start < complete.length) {
@@ -100,12 +135,12 @@ export async function read_snapshot(path: string) {
 					records.push({
 						value: object(JSON.parse(line)),
 						raw_json: line,
-						byte_offset: start,
+						byte_offset: start_offset + start,
 					});
 			} catch {
 				throw new InputError(
 					'invalid',
-					`Invalid complete JSON/UTF-8 record at byte ${start}`,
+					`Invalid complete JSON/UTF-8 record at byte ${start_offset + start}`,
 				);
 			}
 			start = end + 1;
@@ -114,9 +149,10 @@ export async function read_snapshot(path: string) {
 			throw new InputError('partial', 'No complete header yet');
 		return {
 			records,
+			append,
 			byte_offset,
-			partial: byte_offset < buffer.length,
-			hash: digest(complete),
+			partial: byte_offset < before.size,
+			hash: hash.digest('hex'),
 		};
 	} finally {
 		await handle.close();
@@ -130,16 +166,21 @@ export function jsonl_adapter(
 	discover = discover_jsonl,
 ): import('./types.ts').JsonlAdapter {
 	const read: import('./types.ts').JsonlAdapter['read'] =
-		async function (this: import('./types.ts').JsonlAdapter, unit) {
+		async function (
+			this: import('./types.ts').JsonlAdapter,
+			unit,
+			previous,
+		) {
 			if (unit.locators.length !== 1)
 				throw new InputError(
 					'invalid',
 					'JSONL unit requires one input',
 				);
 			const path = unit.locators[0]!;
-			const snapshot = await read_snapshot(path);
+			const snapshot = await read_snapshot(path, previous);
 			return {
 				sessions: [this.parse(snapshot.records, path)],
+				append: snapshot.append,
 				inputs: [
 					{
 						path,

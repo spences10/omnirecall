@@ -22,12 +22,11 @@ export const archive_schema: SchemaDefinition = {
 const baseline_tables = [
 	'sources',
 	'sessions',
-	'revisions',
 	'resources',
 	'records',
 	'parts',
 	'links',
-	'revision_inputs',
+	'session_inputs',
 	'sync_cache',
 ];
 

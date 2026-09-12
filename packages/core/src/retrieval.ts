@@ -10,10 +10,10 @@ import { InputError } from './types.ts';
 export const excerpt_chars = 1200;
 
 export function message_ref(message: {
-	revision_id: string;
+	archive_id: string;
 	native_id: string;
 }): string {
-	return `m1.${message.revision_id}.${Buffer.from(message.native_id).toString('base64url')}`;
+	return `m1.${message.archive_id}.${Buffer.from(message.native_id).toString('base64url')}`;
 }
 
 export function parse_ref(ref: string) {
@@ -22,7 +22,7 @@ export function parse_ref(ref: string) {
 		const native_id = Buffer.from(match[2]!, 'base64url').toString(
 			'utf8',
 		);
-		const identity = { revision_id: match[1]!, native_id };
+		const identity = { archive_id: match[1]!, native_id };
 		if (
 			native_id.trim() &&
 			native_id.length <= 4096 &&
@@ -76,7 +76,6 @@ function attribution(message: LocatedMessage) {
 		state: message.state ?? (message.active ? 'active' : 'inactive'),
 		representation: message.representation ?? 'primary',
 		active: Boolean(message.active),
-		current_revision: Boolean(message.current_revision),
 		source_status: message.source_status,
 		source_checked_at: message.source_checked_at,
 		path_status: message.path_status,
@@ -122,7 +121,7 @@ export function focused_read(
 ) {
 	const identity = parse_ref(ref);
 	const match = archive.read_message(
-		identity.revision_id,
+		identity.archive_id,
 		identity.native_id,
 		char_offset,
 		chars,
@@ -138,7 +137,7 @@ export function focused_read(
 			'Character offset exceeds message length',
 		);
 	const window = archive.context(
-		identity.revision_id,
+		identity.archive_id,
 		identity.native_id,
 		context + 1,
 	);
@@ -150,7 +149,7 @@ export function focused_read(
 				...attribution(match),
 				source_id: match.source_id,
 				session_id: match.session_id,
-				revision_id: match.revision_id,
+				archive_id: match.archive_id,
 				project: match.project,
 				project_truncated: false,
 				title: match.title,
@@ -158,16 +157,16 @@ export function focused_read(
 				source_path: match.source_path,
 				record_key: match.record_key,
 				record_ref: match.record_key
-					? record_ref(match.revision_id, match.record_key)
+					? record_ref(match.archive_id, match.record_key)
 					: null,
 				json_pointer: match.json_pointer,
 				links: match.record_key
 					? archive
-							.record_links(match.revision_id, match.record_key)
+							.record_links(match.archive_id, match.record_key)
 							.slice(0, 20)
 					: [],
 				links_truncated: match.record_key
-					? archive.record_links(match.revision_id, match.record_key)
+					? archive.record_links(match.archive_id, match.record_key)
 							.length > 20
 					: false,
 				before: before.map(message_ref),
@@ -197,9 +196,9 @@ export function raw_read(
 	offset: number,
 	chars: number,
 ) {
-	const { revision_id, native_id } = parse_ref(ref);
+	const { archive_id, native_id } = parse_ref(ref);
 	const row = archive.raw_record(
-		revision_id,
+		archive_id,
 		native_id,
 		offset,
 		chars,
@@ -220,17 +219,17 @@ export function raw_read(
 		results: [
 			{
 				ref,
-				revision_id,
+				archive_id,
 				record_key: row.record_key,
-				record_ref: record_ref(revision_id, row.record_key),
+				record_ref: record_ref(archive_id, row.record_key),
 				previous_ref:
 					row.previous_key === null
 						? null
-						: record_ref(revision_id, row.previous_key),
+						: record_ref(archive_id, row.previous_key),
 				next_ref:
 					row.next_key === null
 						? null
-						: record_ref(revision_id, row.next_key),
+						: record_ref(archive_id, row.next_key),
 				native_type: row.native_type,
 				content: row.content,
 				char_offset: offset,
@@ -242,6 +241,6 @@ export function raw_read(
 	};
 }
 
-export function record_ref(revision_id: string, key: string) {
-	return `r1.${revision_id}.${Buffer.from(key).toString('base64url')}`;
+export function record_ref(archive_id: string, key: string) {
+	return `r1.${archive_id}.${Buffer.from(key).toString('base64url')}`;
 }

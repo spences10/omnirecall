@@ -106,6 +106,7 @@ const transcript_schema = v.looseObject({
 	),
 });
 export const import_schema = v.looseObject({
+	append: v.optional(v.boolean()),
 	sessions: v.array(transcript_schema),
 	inputs: v.array(
 		v.looseObject({

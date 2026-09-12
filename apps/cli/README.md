@@ -35,33 +35,30 @@ including records without searchable text. Raw excerpts may be
 fragments of JSON.
 
 Plain sync prints a short summary of processed/unchanged files,
-revisions, and grouped issue counts. Use `--verbose` to include
+updated sessions, and grouped issue counts. Use `--verbose` to include
 individual issue paths and errors, or `--json` for quiet, structured
 results. Detailed issues are capped at 100; grouped counts include
 every issue. Partial syncs retain exit code 2, and operational
 failures retain exit code 1.
 
-Interactive terminals also show discovery, checking and import
-progress with elapsed time on stderr. Captured output contains only
-the summary. Counts are per source and phase; checking and importing
-are separate phases. Unchanged inputs reuse a persistent cache and are
-counted in `files_skipped` (also included in `files_indexed`). The
-first sync populates this cache.
+Interactive terminals show progress and elapsed time on stderr.
+Captured output contains only the summary. Unchanged inputs reuse a
+persistent checkpoint and are counted in `files_skipped` (also
+included in `files_indexed`). Each input is processed independently.
 
 Cache checks include file identity, size, nanosecond
-modification/change times, permissions, parser version and source
-title metadata. Changed files are fully reprocessed to preserve
-rewrites, branches and rollback history. Parsed imports are staged in
-a private temporary directory, then ingested after checking that their
-inputs are still unchanged; temporary data is removed when sync
-finishes or reports an error.
+modification/change times, permissions, parser version and title
+metadata. Growing JSONL files resume after the saved offset once their
+imported prefix is verified. Rewrites replace the stored session.
+Records, searchable text and checkpoints are committed together.
 
 Plain sync discovers standard Pi/Claude/Codex locations and reuses
 stored roots. Explicit root flags override that selection. Queries use
 only the archive. Missing source histories do not erase archived
-evidence. Full revisions retain changed content; `--include-history`
-exposes earlier revisions and inactive/superseded work. External
-attachment files are not copied.
+evidence. `--include-history` exposes inactive work and alternative
+representations still present in the imported source history. Previous
+file versions are not retained. External attachment files are not
+copied.
 
 The Claude adapter covers an initial set of transcript shapes, keeps
 subagent files separate, and reports branch state as unknown. It does

@@ -208,7 +208,7 @@ function command(name: string) {
 			'include-history': {
 				type: 'boolean',
 				description:
-					'Include superseded revisions and abandoned branches/turns; not current work',
+					'Include inactive branches and alternative representations',
 			},
 			limit: {
 				type: 'string',
