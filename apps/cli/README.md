@@ -48,6 +48,8 @@ pnpx omnirecall read '<ref from search>' --context 2
 Run `sync` to pick up new conversations. Add `--json` for structured
 results. Search defaults to conversation messages; use `--kind all` to
 include tool activity. Each command's `--help` lists its options.
+Search supports FTS5 expressions: `"source path"`,
+`sqlite OR database`, and `migrat*`.
 
 Supports Pi v3, Codex paginated histories, and Claude Code
 transcripts, including separate subagent sessions. Claude team/task

@@ -259,3 +259,57 @@ test('provenance prefers available inputs and excludes unrelated resources', () 
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test('FTS5 expressions find phrases, alternatives, prefixes and exclusions safely', () => {
+	const archive = new Archive(':memory:');
+	try {
+		archive.register(source, 'available');
+		for (const [id, content] of [
+			['one', 'source path migration'],
+			['two', 'source slow path database'],
+			['three', 'sqlite migrations'],
+			['four', 'package-smoke-needle'],
+		])
+			archive.store(
+				source,
+				`/test/${id}.jsonl`,
+				{
+					...transcript,
+					native_id: id,
+					messages: [{ ...transcript.messages[0]!, content }],
+				},
+				snapshot,
+			);
+		const find = (query: string) =>
+			archive
+				.search(query, options)
+				.map((row) => row.content)
+				.sort();
+		expect(find('source path')).toHaveLength(2);
+		expect(find('"source path"')).toEqual(['source path migration']);
+		expect(find('sqlite OR database')).toHaveLength(2);
+		expect(find('migrat*')).toHaveLength(2);
+		expect(find('(sqlite OR database) NOT slow')).toEqual([
+			'sqlite migrations',
+		]);
+		expect(find('package-smoke-needle')).toEqual([
+			'package-smoke-needle',
+		]);
+		expect(find('"package-smoke-needle" OR sqlite')).toHaveLength(2);
+		expect(
+			archive.recall('sqlite OR database', options),
+		).toHaveLength(2);
+		for (const query of [
+			'"unfinished',
+			'sqlite OR',
+			'(sqlite OR database',
+			'badcolumn:sqlite',
+		]) {
+			expect(() => find(query)).toThrow('Invalid FTS5 query');
+		}
+		expect(find('"sqlite; DROP TABLE parts; --"')).toEqual([]);
+		expect(find('sqlite')).toEqual(['sqlite migrations']);
+	} finally {
+		archive.close();
+	}
+});

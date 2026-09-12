@@ -170,7 +170,10 @@ test('SQL-level excerpts stay bounded and a late match remains visible in its sn
 	expect(match.content.length).toBe(4000);
 	expect(match.content_truncated).toBe(1);
 	expect(match.snippet).toContain('latekeyword');
-	expect(() => archive.search('" OR 1=1 --', options)).not.toThrow();
+	expect(() => archive.search('" OR 1=1 --', options)).toThrow(
+		'Invalid FTS5 query',
+	);
+	expect(archive.search('latekeyword', options)).toHaveLength(1);
 });
 
 test('Codex sidecar titles create an immutable metadata revision', async () => {

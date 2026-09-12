@@ -719,3 +719,46 @@ test('command help exposes only relevant options without a separate guide', () =
 	expect(read.stdout).not.toContain('--agent');
 	expect(run_cli(['--help']).stdout).not.toContain('guide');
 });
+
+test('FTS5 syntax works through search and recall with actionable malformed-query errors', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omni-fts-'));
+	try {
+		const db = join(root, 'archive.db');
+		writeFileSync(join(root, 'session.jsonl'), jsonl(pi_records()));
+		expect(
+			run_cli(['sync', '--pi-root', root, '--db', db, '--json'])
+				.status,
+		).toBe(0);
+		for (const mode of [
+			['search'],
+			['search', '--full'],
+			['recall'],
+			['recall', '--compact'],
+		]) {
+			const result = run_cli([
+				...mode,
+				'"café migrations" OR nonexistent',
+				'--db',
+				db,
+				'--json',
+			]);
+			expect(result.status, result.stdout).toBe(0);
+			expect(JSON.parse(result.stdout).results).toHaveLength(1);
+			const invalid = run_cli([
+				...mode,
+				'migration OR',
+				'--db',
+				db,
+				'--json',
+			]);
+			expect(invalid.status).toBe(1);
+			expect(JSON.parse(invalid.stdout)).toMatchObject({
+				status: 'error',
+				code: 'arguments',
+				message: expect.stringContaining('Invalid FTS5 query'),
+			});
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

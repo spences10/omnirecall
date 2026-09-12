@@ -6,6 +6,7 @@ import { sql } from './queries.ts';
 import { apply_schema } from './schema.ts';
 import { parse_cache, type SyncCache } from './sync-cache.ts';
 import {
+	InputError,
 	type Agent,
 	type Message,
 	type Source,
@@ -441,19 +442,39 @@ export class Archive {
 	}
 
 	search(query: string, options: SearchOptions): SearchMatch[] {
-		// Quote each word so callers cannot inject FTS operators.
-		const expression = query
-			.trim()
-			.split(/\s+/)
-			.map((word) => `"${word.replaceAll('"', '""')}"`)
-			.join(' AND ');
-		return this.#statement(sql.search).all({
-			...session_parameters(options),
-			query: expression,
-			kind: options.kind ?? null,
-			after: options.after ?? null,
-			before: options.before ?? null,
-		}) as SearchMatch[];
+		const trimmed = query.trim();
+		// Preserve explicit FTS5 syntax. Ordinary punctuation-containing words
+		// remain literal terms, as they were before expression support.
+		const expression = /["*()^+:]|\b(?:AND|OR|NOT|NEAR)\b/.test(
+			trimmed,
+		)
+			? trimmed
+			: trimmed
+					.split(/\s+/)
+					.map((word) => `"${word}"`)
+					.join(' AND ');
+		try {
+			return this.#statement(sql.search).all({
+				...session_parameters(options),
+				query: expression,
+				kind: options.kind ?? null,
+				after: options.after ?? null,
+				before: options.before ?? null,
+			}) as SearchMatch[];
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				/^(?:fts5: syntax error|unterminated string|no such column:|fts5: column queries are not supported)/.test(
+					error.message,
+				)
+			) {
+				throw new InputError(
+					'arguments',
+					'Invalid FTS5 query. Use balanced double quotes and parentheses, uppercase AND/OR/NOT, or a trailing * for prefixes. Quote punctuation-containing terms inside expressions; see search --help.',
+				);
+			}
+			throw error;
+		}
 	}
 
 	recall(

@@ -205,7 +205,7 @@ function command(name: string) {
 			description:
 				name === 'read'
 					? 'Exact ref copied from search or sessions'
-					: 'Short terms ANDed within one part; no OR/phrase/prefix syntax',
+					: 'FTS5 query: words use AND; "source path", sqlite OR database, migrat*, (a OR b) NOT c. Quote punctuation in expressions.',
 		},
 		db: {
 			type: 'string',
