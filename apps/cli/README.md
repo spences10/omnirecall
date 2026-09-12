@@ -17,9 +17,7 @@ pnpx omnirecall read '<ref>' --raw --chars 1200 --json
 
 These commands describe the next release. For the working tree, use
 `pnpm build` and `pnpm start` from the repository root. Requires
-Node.js 24.11+. Schema 2 needs a fresh database; existing schema 1
-archives are refused without modification. Choose a new `--db` path
-for the redesign.
+Node.js 24.11+.
 
 Search first and expand selected results. `read --raw` pages through
 the original record; follow `next_char_offset` for longer content.
@@ -39,8 +37,7 @@ progress with elapsed time on stderr. Captured output contains only
 the summary. Counts are per source and phase; checking and importing
 are separate phases. Unchanged inputs reuse a persistent cache and are
 counted in `files_skipped` (also included in `files_indexed`). The
-first sync after upgrading an existing archive populates this cache.
-No database reset is needed.
+first sync populates this cache.
 
 Cache checks include file identity, size, nanosecond
 modification/change times, permissions, parser version and source

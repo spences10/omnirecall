@@ -769,17 +769,18 @@ test('unfinished tails remain partial when cached and are imported when complete
 	expect(archive.search('completed', options)).toHaveLength(1);
 });
 
-test('existing archives without the acceleration table upgrade on writable open', async () => {
+test('incomplete development baselines are rejected without adding cache tables', async () => {
 	await sync(archive, sources, adapters);
 	archive.close();
 	inspection.exec('DROP TABLE sync_cache');
-	archive = new Archive(join(root, 'omnirecall.db'));
-	const result = await sync(archive, sources, adapters);
-	expect(result).toMatchObject({
-		revisions_added: 0,
-		files_skipped: 0,
-	});
-	expect((await sync(archive, sources, adapters)).files_skipped).toBe(
-		2,
+	const original = readFileSync(join(root, 'omnirecall.db'));
+	expect(() => new Archive(join(root, 'omnirecall.db'))).toThrow(
+		'release baseline',
 	);
+	expect(readFileSync(join(root, 'omnirecall.db'))).toEqual(original);
+	// Restore the fixture so afterEach can close an open Archive.
+	inspection.exec(
+		'CREATE TABLE sync_cache (source_id TEXT, unit_key TEXT, signature TEXT, data TEXT, PRIMARY KEY(source_id,unit_key))',
+	);
+	archive = new Archive(join(root, 'omnirecall.db'));
 });

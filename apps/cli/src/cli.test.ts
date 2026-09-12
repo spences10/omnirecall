@@ -4,6 +4,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	readdirSync,
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
@@ -668,4 +669,17 @@ test('empty and failed human syncs give plain explanations', () => {
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test('build ships migration resources unchanged', () => {
+	const source = new URL(
+		'../../../packages/core/src/migrations/',
+		import.meta.url,
+	);
+	for (const name of readdirSync(source))
+		expect(
+			readFileSync(
+				new URL(`../dist/migrations/${name}`, import.meta.url),
+			),
+		).toEqual(readFileSync(new URL(name, source)));
 });

@@ -1,27 +1,16 @@
-import { parse_cache, type SyncCache } from './sync-cache.ts';
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-} from 'node:fs';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { digest, parser_version } from './files.ts';
 import { sql } from './queries.ts';
+import { apply_schema } from './schema.ts';
+import { parse_cache, type SyncCache } from './sync-cache.ts';
 import {
-	InputError,
 	type Agent,
 	type Message,
 	type Source,
 	type Transcript,
 } from './types.ts';
-
-const application_id = 0x4f4d4e49;
-const schema = readFileSync(
-	new URL('./schema.sql', import.meta.url),
-	'utf8',
-);
 
 type SourceFilter = { agent?: Agent; source?: string };
 type PageOptions = { limit: number; offset: number };
@@ -124,36 +113,7 @@ export class Archive {
 			this.#db.exec(
 				'PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;',
 			);
-			const id = this.#statement('PRAGMA application_id').get()
-				?.application_id;
-			if (id !== application_id) {
-				if (existed || read_only)
-					throw new InputError(
-						'database',
-						'Not an Omni Recall archive; refusing to modify it',
-					);
-				this.#transaction(() =>
-					this.#db.exec(`
-					${schema}
-					PRAGMA application_id=${application_id};
-					PRAGMA user_version=2;
-				`),
-				);
-			}
-			if (
-				this.#statement('PRAGMA user_version').get()?.user_version !==
-				2
-			)
-				throw new InputError(
-					'database',
-					'Unsupported archive schema',
-				);
-			// Additive, disposable acceleration data; existing schema-2 archives stay readable.
-			if (!read_only)
-				this.#db.exec(`CREATE TABLE IF NOT EXISTS sync_cache (
-    source_id TEXT NOT NULL, unit_key TEXT NOT NULL, signature TEXT NOT NULL,
-    data TEXT NOT NULL, PRIMARY KEY(source_id, unit_key)
-   )`);
+			apply_schema(this.#db, { read_only, allow_create: !existed });
 			if (!read_only && path !== ':memory:') chmodSync(path, 0o600);
 		} catch (error) {
 			this.close();

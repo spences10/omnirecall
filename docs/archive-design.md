@@ -138,11 +138,11 @@ agent relationship. Supported endpoint shapes are:
 
 ```ts
 type Endpoint =
-	| { type: 'session'; session_key: string }
-	| { type: 'record'; record_key: string }
-	| { type: 'part'; record_key: string; part_key: string }
-	| { type: 'native'; namespace: string; value: string }
-	| { type: 'locator'; locator: string };
+	| { type: "session"; session_key: string }
+	| { type: "record"; record_key: string }
+	| { type: "part"; record_key: string; part_key: string }
+	| { type: "native"; namespace: string; value: string }
+	| { type: "locator"; locator: string };
 ```
 
 Record/part endpoints refer to the owning revision. Session endpoints
@@ -217,7 +217,7 @@ interface SessionSnapshot {
 	started_at: string | null;
 	ended_at: string | null;
 	metadata: Record<string, unknown>;
-	coverage: 'complete' | 'partial';
+	coverage: "complete" | "partial";
 	records: RecordSnapshot[];
 	links: LinkSnapshot[];
 }
@@ -381,9 +381,8 @@ implementation:
   representative Claude format verification remains necessary before
   claiming comprehensive support.
 
-No source migration or cleanup command has been introduced. Schema 1
-archives remain untouched and require a separate new schema 2 database
-for this implementation.
+Storage upgrade conventions are documented alongside the
+[migration runner](../packages/core/src/migrations/README.md).
 
 ### Automatic source selection
 

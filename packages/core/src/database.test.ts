@@ -82,8 +82,9 @@ test('provenance path and status come from the same most recent candidate', () =
 });
 
 test('reuses statements across imports and retrievals', () => {
-	const prepare = vi.spyOn(DatabaseSync.prototype, 'prepare');
 	const archive = new Archive(':memory:');
+	// Schema setup has its own version checks; archive queries should reuse statements.
+	const prepare = vi.spyOn(DatabaseSync.prototype, 'prepare');
 	try {
 		for (let index = 0; index < 3; index++) {
 			archive.register(source, 'available');
@@ -166,7 +167,7 @@ test('opens the current schema read-only without modifying the database', () => 
 				),
 			);
 			existing.exec(
-				'PRAGMA application_id=0x4f4d4e49; PRAGMA user_version=2;',
+				'PRAGMA application_id=0x4f4d4e49; PRAGMA user_version=1;',
 			);
 		} finally {
 			existing.close();

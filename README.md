@@ -65,10 +65,6 @@ evidence. There is no automatic cleanup. Full revisions repeat session
 content, so frequent imports of growing files can use substantial disk
 space.
 
-Archive schema 2 requires a fresh database; schema 1 archives are
-rejected without modification. Use a new `--db` path when reviewing
-this redesign. No migrations are supplied.
-
 The adapters still enforce their supported history formats. Pi and
 Codex reject unfamiliar semantics that their parsers cannot safely
 interpret. Claude preserves extra envelopes, but its initial adapter

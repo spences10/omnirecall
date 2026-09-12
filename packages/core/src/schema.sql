@@ -118,3 +118,12 @@ CREATE TABLE revision_inputs (
 CREATE INDEX record_order ON records(revision_id, source_order);
 CREATE INDEX record_native ON records(revision_id,native_id);
 CREATE INDEX part_kind ON parts(kind);
+
+
+CREATE TABLE sync_cache (
+  source_id TEXT NOT NULL,
+  unit_key TEXT NOT NULL,
+  signature TEXT NOT NULL,
+  data TEXT NOT NULL,
+  PRIMARY KEY (source_id, unit_key)
+);
