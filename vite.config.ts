@@ -5,6 +5,7 @@ export default defineConfig({
 		include: [
 			'apps/*/src/**/*.test.ts',
 			'packages/*/src/**/*.test.ts',
+			'tools/**/*.test.ts',
 		],
 	},
 	fmt: {
@@ -15,6 +16,8 @@ export default defineConfig({
 		proseWrap: 'always',
 	},
 	lint: {
+		jsPlugins: ['./tools/boundaries.ts'],
+		rules: { 'omnirecall/boundaries': 'error' },
 		options: {
 			typeAware: true,
 			typeCheck: true,

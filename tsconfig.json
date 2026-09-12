@@ -11,6 +11,6 @@
 		"rewriteRelativeImportExtensions": true,
 		"types": ["node", "vitest"]
 	},
-	"include": ["apps/cli/src", "packages/*/src"],
+	"include": ["apps/cli/src", "packages/*/src", "tools"],
 	"exclude": ["node_modules", "**/dist"]
 }

@@ -173,17 +173,12 @@ running; original sources may no longer contain everything it retains.
 
 ## Design and validation
 
-See the [PRD](docs/omni-recall-prd.md),
-[source mapping](docs/session-record-mapping.md), and
-[design proposal and implementation notes](docs/archive-design.md).
-The executable schema is [schema.sql](packages/core/src/schema.sql).
+See [agent support and format research](AGENTS.md) and
+[archive design](docs/archive-design.md). The executable schema is
+[schema.sql](packages/core/src/schema.sql).
 
 ```bash
-pnpm check
-pnpm exec tsc --noEmit
-pnpm test
-pnpm peers check
-pnpm --filter omnirecall pack --dry-run
+pnpm verify
 ```
 
 Dependency versions use the workspace catalog. Use pnpm packaging so

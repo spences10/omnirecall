@@ -13,7 +13,9 @@
 		"test:watch": "pnpm build && vp test watch",
 		"changeset": "changeset",
 		"version": "changeset version",
-		"release": "pnpm check && pnpm test && changeset publish"
+		"release": "pnpm verify && changeset publish",
+		"test:package": "node tools/smoke-package.ts",
+		"verify": "pnpm check && pnpm test && pnpm test:package"
 	},
 	"devDependencies": {
 		"@changesets/cli": "catalog:",
