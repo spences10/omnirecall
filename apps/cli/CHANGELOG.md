@@ -1,5 +1,17 @@
 # omnirecall
 
+## 0.0.4
+
+### Patch Changes
+
+- d67007a: Add README preview image illustrating shared session recall
+  across Pi, Codex, and Claude Code conversations.
+- e25234d: Enable FTS5 phrases, alternatives, prefixes, and exclusions
+  with actionable query errors and updated command help.
+- 772bc6d: Generate reproducible README previews from synthetic
+  session evidence, highlighting inline recall through familiar npx
+  commands.
+
 ## 0.0.3
 
 ### Patch Changes
