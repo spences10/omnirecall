@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { InputError, object } from '../../core/src/types.ts';
 import {
 	identity_schema,
 	metadata_schema,
@@ -8,7 +9,7 @@ import {
 
 const envelope = { timestamp: timestamp_schema };
 const block = v.pipe(
-	// Pi/Codex classify missing or unknown block types as unsupported in dialogue().
+	// Pi classifies missing or unknown block types as unsupported in dialogue().
 	v.looseObject({ type: v.optional(v.unknown()) }),
 	v.check(
 		(value) =>
@@ -48,11 +49,92 @@ export const codex_entry_schema = v.looseObject({
 	type: identity_schema,
 	payload: v.looseObject({}),
 });
-export const codex_item_schema = v.looseObject({
-	id: identity_schema,
-	type: identity_schema,
-	content,
+const codex_text_block = v.looseObject({
+	type: v.picklist(['text', 'Text']),
+	text: v.string(),
 });
+const codex_attachment_types = [
+	'image',
+	'local_image',
+	'audio',
+	'local_audio',
+	'skill',
+	'mention',
+] as const;
+const codex_user_block = v.variant('type', [
+	codex_text_block,
+	v.looseObject({ type: v.picklist(codex_attachment_types) }),
+]);
+export const codex_item_schema = v.variant('type', [
+	v.looseObject({
+		id: identity_schema,
+		type: v.literal('UserMessage'),
+		content: v.union([v.string(), v.array(codex_user_block)]),
+	}),
+	v.looseObject({
+		id: identity_schema,
+		type: v.literal('AgentMessage'),
+		content: v.union([v.string(), v.array(codex_text_block)]),
+	}),
+]);
+export function codex_dialogue(
+	item: Record<string, unknown>,
+	byte_offset: number,
+): string {
+	if (Array.isArray(item.content))
+		for (const [index, value] of item.content.entries()) {
+			const block = object(value);
+			if (
+				typeof block.type === 'string' &&
+				![
+					'text',
+					'Text',
+					...(item.type === 'UserMessage'
+						? codex_attachment_types
+						: []),
+				].includes(block.type)
+			)
+				throw new InputError(
+					'unsupported',
+					`Codex record at byte ${byte_offset}: Unknown dialogue content block type at content.${index}.type`,
+				);
+		}
+	const parsed = validate_source(
+		codex_item_schema,
+		item,
+		'Codex completed item',
+		byte_offset,
+	);
+	return typeof parsed.content === 'string'
+		? parsed.content
+		: parsed.content
+				.filter(
+					(block) => block.type === 'text' || block.type === 'Text',
+				)
+				.map((block) => block.text)
+				.join('\n');
+}
+const realtime_common = {
+	id: identity_schema,
+	realtime_session_id: identity_schema,
+};
+export const codex_realtime_schema = v.variant('type', [
+	v.looseObject({
+		...realtime_common,
+		type: v.literal('realtime_session_started'),
+	}),
+	v.looseObject({
+		...realtime_common,
+		type: v.literal('transcript_segment'),
+		role: v.picklist(['user', 'assistant']),
+		text: v.string(),
+	}),
+	v.looseObject({
+		...realtime_common,
+		type: v.literal('realtime_session_closed'),
+		outcome: identity_schema,
+	}),
+]);
 export const codex_title_schema = v.looseObject({
 	id: identity_schema,
 	updated_at: timestamp_schema,

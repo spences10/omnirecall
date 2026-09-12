@@ -33,10 +33,23 @@ export function validate<S extends v.GenericSchema>(
 ): v.InferOutput<S> {
 	const result = v.safeParse(schema, value, { abortEarly: true });
 	if (!result.success) {
-		const issue = result.issues[0];
-		const path =
-			issue.path?.map((entry) => String(entry.key)).join('.') ||
-			'<root>';
+		// Nested union issues use paths relative to their enclosing issue.
+		const pending = result.issues.map((issue) => ({
+			issue: issue as v.BaseIssue<unknown>,
+			prefix: [] as string[],
+		}));
+		let keys: string[] = [];
+		while (pending.length) {
+			const { issue, prefix } = pending.pop()!;
+			const path = [
+				...prefix,
+				...(issue.path?.map((entry) => String(entry.key)) ?? []),
+			];
+			if (path.length > keys.length) keys = path;
+			for (const child of issue.issues ?? [])
+				pending.push({ issue: child, prefix: path });
+		}
+		const path = keys.join('.') || '<root>';
 		throw new InputError(
 			'invalid',
 			`${context}: invalid field ${path}`,

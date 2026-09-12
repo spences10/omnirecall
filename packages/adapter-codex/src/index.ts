@@ -2,9 +2,10 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { preserve_records } from '../../adapter-shared/src/evidence.ts';
 import {
+	codex_dialogue,
 	codex_entry_schema,
 	codex_header_schema,
-	codex_item_schema,
+	codex_realtime_schema,
 	codex_title_schema,
 	validate_source,
 } from '../../adapter-shared/src/schemas.ts';
@@ -15,7 +16,6 @@ import {
 } from '../../core/src/files.ts';
 import {
 	date,
-	dialogue,
 	InputError,
 	metadata,
 	object,
@@ -99,6 +99,28 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				'unsupported',
 				'Unknown Codex response item',
 			);
+		if (entry.type === 'realtime_item') {
+			if (
+				typeof payload.type === 'string' &&
+				![
+					'realtime_session_started',
+					'transcript_segment',
+					'realtime_session_closed',
+				].includes(payload.type)
+			)
+				throw new InputError(
+					'unsupported',
+					`Codex record at byte ${byte_offset}: Unknown realtime item type`,
+				);
+			validate_source(
+				codex_realtime_schema,
+				payload,
+				'Codex realtime item',
+				byte_offset,
+			);
+			// Realtime evidence is preserved separately; it need not belong to a coding turn.
+			continue;
+		}
 		if (entry.type === 'turn_context') {
 			current_turn = text(payload.turn_id);
 			ensure_turn(current_turn);
@@ -195,26 +217,8 @@ export function parse_codex(records: RecordLine[]): Transcript {
 					'Dialogue without a turn ID',
 				);
 			ensure_turn(turn_id);
-			validate_source(
-				codex_item_schema,
-				item,
-				'Codex completed item',
-				byte_offset,
-			);
+			const content = codex_dialogue(item, byte_offset);
 			const id = text(item.id);
-			const content = dialogue(
-				item.content,
-				item_type === 'UserMessage'
-					? [
-							'image',
-							'local_image',
-							'audio',
-							'local_audio',
-							'skill',
-							'mention',
-						]
-					: [],
-			);
 			const previous = messages.get(id);
 			const role = item_type === 'UserMessage' ? 'user' : 'assistant';
 			if (previous) {
@@ -323,5 +327,5 @@ export const codex_adapter = Object.assign(
 			.filter((path) => path !== join(root, 'session_index.jsonl'))
 			.sort();
 	}),
-	{ titles: session_titles },
+	{ titles: session_titles, parser_version: 3 },
 );

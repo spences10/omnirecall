@@ -180,6 +180,24 @@ export function preserve_records(
 					'/message',
 				);
 		} else {
+			if (
+				v.type === 'realtime_item' &&
+				p.type === 'transcript_segment'
+			) {
+				const segment = add(
+					'message',
+					str(p.text) ?? '',
+					'/payload/text',
+					str(p.role) ?? 'unknown',
+				);
+				if (segment) {
+					// Realtime segments are evidence, not an inferred continuation of the last coding turn.
+					segment.turn_id = null;
+					segment.parent_id = null;
+					segment.state = 'unknown';
+					segment.active = true;
+				}
+			}
 			if (v.type === 'response_item') {
 				if (
 					p.type === 'function_call' ||

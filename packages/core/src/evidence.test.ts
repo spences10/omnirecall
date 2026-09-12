@@ -374,3 +374,33 @@ test('a failed multi-session unit rolls back all revisions and resource checkpoi
 			inspect.close();
 		}
 	}));
+
+test('Codex realtime transcript evidence can be searched and read with exact provenance', async () =>
+	fixture(async (root, archive) => {
+		const segment = codex_entry('realtime_item', {
+			id: 'segment',
+			realtime_session_id: 'rt-1',
+			type: 'transcript_segment',
+			role: 'assistant',
+			text: 'realtime_unique café reply',
+		});
+		writeFileSync(
+			join(root, 'session.jsonl'),
+			jsonl([codex_records()[0]!, segment]),
+		);
+		expect(
+			await sync(
+				archive,
+				[source_config('codex', root)],
+				[codex_adapter],
+			),
+		).toMatchObject({ revisions_added: 1, failures: 0 });
+		const hit = archive.search('realtime_unique', options)[0]!;
+		expect(hit).toMatchObject({
+			content: 'realtime_unique café reply',
+			state: 'unknown',
+			json_pointer: '/payload/text',
+		});
+		const raw = raw_read(archive, message_ref(hit), 0, 2000);
+		expect(JSON.parse(raw.results[0]!.content)).toEqual(segment);
+	}));

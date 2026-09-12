@@ -65,7 +65,16 @@ export function codex_item(
 	return codex_entry('event_msg', {
 		type: 'item_completed',
 		turn_id,
-		item: { id, type, content: [{ type: 'text', text: content }] },
+		item: {
+			id,
+			type,
+			content: [
+				{
+					type: type === 'AgentMessage' ? 'Text' : 'text',
+					text: content,
+				},
+			],
+		},
 	});
 }
 export function codex_records(
