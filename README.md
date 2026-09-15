@@ -44,8 +44,20 @@ skill for local assistant tasks in the desktop app. It uses the
 published CLI to find earlier conversations and return source context.
 It requires terminal access to the machine holding your history.
 
-The plugin and repository marketplace live alongside the CLI. See the
-plugin guide for local installation, testing, and distribution.
+In the ChatGPT desktop app, open **Plugins → Add → Add plugin
+marketplace**. Enter `spences10/omnirecall` as the source, `main` as
+the Git ref, and leave sparse paths empty. Add the marketplace,
+install **OmniRecall**, and start a new local task.
+
+Or install with Codex CLI:
+
+```sh
+codex plugin marketplace add spences10/omnirecall --ref main
+codex plugin add omnirecall@personal
+```
+
+See the [installation guide](docs/plugin-installation.md) for updates,
+requirements, and troubleshooting.
 
 ## Run commands directly
 
