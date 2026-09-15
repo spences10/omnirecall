@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"collision","cwd":"/synthetic/project","timestamp":"2026-09-01T10:00:00.000Z","parentSession":"/synthetic/parent.jsonl"}
+{"type":"session_info","id":"name","parentId":null,"timestamp":"2026-09-01T10:00:00.000Z","name":"Pi migration plan"}
+{"type":"message","id":"u1","parentId":"name","timestamp":"2026-09-01T10:00:00.000Z","message":{"role":"user","content":"Prepare the database"}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-09-01T10:00:00.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hidden-secret-thought"},{"type":"text","text":"Use café migrations safely"}]}}
+{"type":"message","id":"tool","parentId":"a1","timestamp":"2026-09-01T10:00:00.000Z","message":{"role":"toolResult","content":[{"type":"text","text":"private-tool-output"}]}}
+{"type":"message","id":"u2","parentId":"tool","timestamp":"2026-09-01T10:00:00.000Z","message":{"role":"user","content":"Confirm the final checks"}}

@@ -1,0 +1,9 @@
+{"type":"session_meta","timestamp":"2026-09-01T10:00:00.000Z","payload":{"id":"collision","cwd":"/synthetic/project","history_mode":"paginated","thread_name":"Codex migration plan"}}
+{"type":"event_msg","timestamp":"2026-09-01T10:00:00.000Z","payload":{"type":"task_started","turn_id":"turn-1"}}
+{"type":"event_msg","timestamp":"2026-09-01T10:00:00.000Z","payload":{"type":"item_completed","turn_id":"turn-1","item":{"id":"u1","type":"UserMessage","content":[{"type":"text","text":"Prepare the database"}]}}}
+{"type":"response_item","timestamp":"2026-09-01T10:00:00.000Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Duplicate café migrations safely"}]}}
+{"type":"response_item","timestamp":"2026-09-01T10:00:00.000Z","payload":{"type":"reasoning","encrypted_content":"hidden-secret-thought"}}
+{"type":"event_msg","timestamp":"2026-09-01T10:00:00.000Z","payload":{"type":"item_completed","turn_id":"turn-1","item":{"id":"a1","type":"AgentMessage","content":[{"type":"Text","text":"Use café migrations safely"}]}}}
+{"type":"response_item","timestamp":"2026-09-01T10:00:00.000Z","payload":{"type":"function_call_output","output":"private-tool-output"}}
+{"type":"event_msg","timestamp":"2026-09-01T10:00:00.000Z","payload":{"type":"item_completed","turn_id":"turn-1","item":{"id":"u2","type":"UserMessage","content":[{"type":"text","text":"Confirm the final checks"}]}}}
+{"type":"event_msg","timestamp":"2026-09-01T10:00:00.000Z","payload":{"type":"task_complete","turn_id":"turn-1"}}
