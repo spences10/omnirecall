@@ -1,0 +1,28 @@
+{
+	"name": "omnirecall",
+	"version": "0.1.0",
+	"description": "Find decisions, fixes, and context in local coding-agent conversations with the OmniRecall CLI.",
+	"author": {
+		"name": "Scott Spence",
+		"url": "https://github.com/spences10"
+	},
+	"homepage": "https://github.com/spences10/omnirecall/tree/main/plugins/omnirecall",
+	"repository": "https://github.com/spences10/omnirecall",
+	"license": "MIT",
+	"keywords": ["memory", "recall", "coding-agents", "local-history"],
+	"skills": "./skills/",
+	"interface": {
+		"displayName": "OmniRecall",
+		"shortDescription": "Recall past coding conversations across agents",
+		"longDescription": "Search local Claude Code, Codex, and Pi conversations for earlier decisions, fixes, and commands. Uses the OmniRecall CLI to refresh a local archive and retrieve relevant excerpts with source context. Requires Node.js 24.11 or newer, terminal access, and permission to access the user's local history. The archive stays on the machine; retrieved excerpts enter the current assistant conversation.",
+		"developerName": "Scott Spence",
+		"category": "Productivity",
+		"capabilities": ["Read", "Write"],
+		"websiteURL": "https://github.com/spences10/omnirecall",
+		"defaultPrompt": [
+			"Find where we discussed making a plugin.",
+			"What did I decide about authentication last week?",
+			"Find the command that fixed my earlier build failure."
+		]
+	}
+}

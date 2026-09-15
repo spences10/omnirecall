@@ -37,6 +37,16 @@ without you leaving the conversation.
 
 Requires Node.js 24.11 or newer.
 
+## Desktop plugin
+
+The [OmniRecall plugin](plugins/omnirecall/README.md) adds a recall
+skill for local assistant tasks in the desktop app. It uses the
+published CLI to find earlier conversations and return source context.
+It requires terminal access to the machine holding your history.
+
+The plugin and repository marketplace live alongside the CLI. See the
+plugin guide for local installation, testing, and distribution.
+
 ## Run commands directly
 
 ```bash
