@@ -23,6 +23,20 @@ independent, including after either file changes. A moved file is a
 new import unit; its earlier archived copy remains available. We do
 not infer file moves or merge copies.
 
+Session selectors accept exact `session_id`/`archive_id` values or a
+unique native/archive ID prefix. Exact archive identities take
+precedence; other matches must identify one session within the
+supplied agent/source/project scope. Title, date, query and pagination
+filters are applied only after resolution and cannot hide ambiguity.
+An unmatched selector returns no results. Native identifiers and
+prefixes are case-sensitive and literal, including `%` and `_`.
+
+Session listings include `short_id`: an archive-ID prefix of at least
+12 characters, extended as needed to avoid native/archive collisions
+anywhere in the archive, not just the displayed page. Full archive IDs
+remain the fallback. New imports may make an older prefix ambiguous;
+full archive identities remain stable.
+
 ## Import
 
 Each adapter discovers import units and reads them into sessions with
@@ -63,10 +77,15 @@ unknown state.
 ## Search and reading
 
 Search uses SQLite FTS over extracted text with agent, source,
-project, session, kind and date filters. Normal search uses primary
-active parts. `--include-history` additionally includes inactive parts
-and alternative representations present in the imported records, not
-previous imports.
+project, session, title, kind and date filters. Title matching is a
+literal substring with SQLite's ASCII case-insensitive comparison;
+non-ASCII characters match exactly. Session listing dates filter the
+stored session timestamp, while search/recall dates filter message
+timestamps. CLI date-only bounds span the whole UTC day; explicit
+timestamps retain their exact inclusive boundaries. Normal search uses
+primary active parts. `--include-history` additionally includes
+inactive parts and alternative representations present in the imported
+records, not previous imports.
 
 Codex sessions explicitly marked as approval reviewers classify their
 user-role prompts as `kind: review_context`, `role: context`, not

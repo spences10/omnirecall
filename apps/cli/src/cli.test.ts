@@ -326,6 +326,213 @@ test('search and recall include whole UTC days but preserve exact timestamp boun
 	}
 });
 
+test('session discovery combines title/date filters with safe short identifiers', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omnirecall-discovery-'));
+	const db = join(root, 'archive.db');
+	const pi_root = join(root, 'pi');
+	const codex_root = join(root, 'codex');
+	const first_id = '12345678-aaaa-4000-8000-000000000001';
+	const run = (args: string[]) => {
+		const result = run_cli([
+			...args,
+			'--db',
+			db,
+			'--json',
+			'--max-bytes',
+			'65536',
+		]);
+		expect(result.status, result.stdout).toBe(0);
+		return JSON.parse(result.stdout);
+	};
+	try {
+		mkdirSync(pi_root);
+		mkdirSync(codex_root);
+		for (const [id, title, timestamp] of [
+			[first_id, 'Plan %_Target alpha', '2026-09-25T00:00:00.000Z'],
+			[
+				'12345678-bbbb-4000-8000-000000000002',
+				'Plan %_Target beta',
+				'2026-09-25T23:59:59.999Z',
+			],
+			[
+				'different',
+				'Plan XXTarget decoy',
+				'2026-09-26T00:00:00.000Z',
+			],
+		]) {
+			const records = pi_records(id).map((record, index) => ({
+				...record,
+				timestamp:
+					index === 0 ? timestamp : '2026-09-26T12:00:00.000Z',
+				...(index === 1 ? { name: title } : {}),
+			}));
+			writeFileSync(join(pi_root, `${id}.jsonl`), jsonl(records));
+		}
+		writeFileSync(
+			join(codex_root, 'copy.jsonl'),
+			jsonl(codex_records(first_id)),
+		);
+		expect(
+			run(['sync', '--pi-root', pi_root, '--codex-root', codex_root])
+				.sessions_updated,
+		).toBe(4);
+		const filters = [
+			'--title',
+			'%_target',
+			'--after',
+			'2026-09-25',
+			'--before',
+			'2026-09-25',
+		];
+		const page = run(['sessions', ...filters, '--limit', '1']);
+		expect(page).toMatchObject({
+			returned_count: 1,
+			has_more: true,
+			next_offset: 1,
+		});
+		const next = run([
+			'sessions',
+			...filters,
+			'--limit',
+			'1',
+			'--offset',
+			'1',
+		]);
+		expect(next).toMatchObject({
+			returned_count: 1,
+			has_more: false,
+			next_offset: null,
+		});
+		expect(next.results[0].archive_id).not.toBe(
+			page.results[0].archive_id,
+		);
+		const first = next.results[0];
+		expect(first.native_id).toBe(first_id);
+		expect(first.short_id).toHaveLength(12);
+		for (const mode of [
+			['search'],
+			['search', '--full'],
+			['recall'],
+			['recall', '--compact'],
+		]) {
+			expect(
+				run([...mode, 'migrations', '--title', '%_TARGET']).results,
+			).toHaveLength(2);
+			expect(
+				run([...mode, 'migrations', ...filters]).results,
+			).toHaveLength(0);
+			expect(
+				run([
+					...mode,
+					'migrations',
+					'--title',
+					'%_target',
+					'--after',
+					'2026-09-26',
+					'--before',
+					'2026-09-26',
+				]).results,
+			).toHaveLength(2);
+		}
+		for (const session of [
+			first.session_id,
+			first.archive_id,
+			first.short_id,
+			first.native_id,
+			first.native_id.slice(0, 12),
+		]) {
+			for (const args of [
+				['sessions'],
+				['search', 'migrations'],
+				['recall', 'migrations'],
+			]) {
+				const scoped = run([
+					...args,
+					'--agent',
+					'pi',
+					'--session',
+					session,
+				]);
+				expect(scoped.results).toHaveLength(1);
+			}
+		}
+		expect(
+			run([
+				'sessions',
+				'--source',
+				first.source_id,
+				'--session',
+				first.native_id,
+			]).results,
+		).toHaveLength(1);
+		expect(
+			run(['sessions', '--session', 'missing-session']).results,
+		).toHaveLength(0);
+		for (const args of [
+			['sessions', '--session', first.native_id],
+			[
+				'sessions',
+				'--session',
+				'12345678',
+				'--agent',
+				'pi',
+				'--title',
+				'alpha',
+			],
+			[
+				'search',
+				'migrations',
+				'--session',
+				first.native_id,
+				'--title',
+				'alpha',
+			],
+			[
+				'recall',
+				'migrations',
+				'--session',
+				first.native_id,
+				'--before',
+				'2000-01-01',
+			],
+		]) {
+			const response = run_cli([...args, '--db', db, '--json']);
+			expect(response.status).toBe(1);
+			expect(JSON.parse(response.stdout)).toMatchObject({
+				code: 'arguments',
+				message: expect.stringContaining('Ambiguous session'),
+			});
+		}
+		for (const args of [
+			['sessions', '--after', 'invalid'],
+			['sessions', '--after', '2026-09-26', '--before', '2026-09-25'],
+			['sessions', '--title', ''],
+			['sessions', '--session', ''],
+			['sources', '--title', 'alpha'],
+			['sync', '--title', 'alpha'],
+			['read', first.first_record_ref, '--title', 'alpha'],
+		]) {
+			const response = run_cli([...args, '--db', db, '--json']);
+			expect(response.status, response.stdout).toBe(1);
+			expect(JSON.parse(response.stdout).code).toBe('arguments');
+		}
+		rmSync(join(pi_root, `${first_id}.jsonl`));
+		run(['sync', '--pi-root', pi_root]);
+		expect(
+			run(['sessions', '--session', first.short_id]).results[0],
+		).toMatchObject({
+			short_id: first.short_id,
+			path_status: 'missing',
+		});
+		expect(
+			run(['search', 'migrations', '--session', first.short_id])
+				.results,
+		).toHaveLength(1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test('compact search, focused reading, and compact recall form a bounded retrieval workflow', () => {
 	const root = mkdtempSync(join(tmpdir(), 'omnirecall-compact-'));
 	const db = join(root, 'archive.db');
@@ -829,6 +1036,12 @@ test('command help exposes only relevant options without a separate guide', () =
 	const search = run_cli(['search', '--help']);
 	expect(search.stdout).toContain('message (default)');
 	expect(search.stdout).not.toContain('--pi-root');
+	expect(search.stdout).toContain('--title');
+	const sessions = run_cli(['sessions', '--help']);
+	for (const flag of ['--title', '--after', '--before'])
+		expect(sessions.stdout).toContain(flag);
+	expect(sessions.stdout).toContain('short_id');
+	expect(sync.stdout).not.toContain('--title');
 	const read = run_cli(['read', '--help']);
 	expect(read.stdout).toContain('--char-offset');
 	expect(read.stdout).not.toContain('--agent');

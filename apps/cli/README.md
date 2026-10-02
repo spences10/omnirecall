@@ -57,6 +57,26 @@ Codex approval-reviewer context is excluded from default dialogue
 searches. Use `--kind review_context` (or `--kind all`) to find those
 copies, and `read --raw` to inspect their original records.
 
+Find a session by title and date, then use its `short_id` to search:
+
+```bash
+pnpx omnirecall sessions --title "migration" --after 2026-09-25 --before 2026-09-25
+pnpx omnirecall search "sqlite" --session '<short_id>'
+```
+
+`--title` matches a literal substring (ASCII case-insensitive) on
+`sessions`, `search`, and `recall`. Session date filters use the
+stored session timestamp; search/recall date filters use message
+timestamps. Date-only bounds cover the whole UTC day.
+
+`--session` accepts the existing full session ID, an archive ID, or a
+unique native/archive ID prefix. Ambiguous identifiers fail rather
+than selecting a session: use a longer prefix or narrow `--agent`,
+`--source`, or `--project`. Title/date filters do not resolve
+identifier ambiguity. Printed `short_id` values are unique across the
+current archive; re-list sessions if a later import makes an older
+prefix ambiguous.
+
 Supports Pi v3, Codex paginated histories, and Claude Code
 transcripts, including separate subagent sessions. Claude team/task
 files and legacy Codex histories are not currently supported.

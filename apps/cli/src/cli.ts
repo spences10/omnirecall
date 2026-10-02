@@ -146,6 +146,7 @@ const command_options: Record<string, string[]> = {
 		'source',
 		'project',
 		'session',
+		'title',
 		'kind',
 		'after',
 		'before',
@@ -162,6 +163,7 @@ const command_options: Record<string, string[]> = {
 		'source',
 		'project',
 		'session',
+		'title',
 		'kind',
 		'after',
 		'before',
@@ -176,6 +178,9 @@ const command_options: Record<string, string[]> = {
 		'source',
 		'project',
 		'session',
+		'title',
+		'after',
+		'before',
 		'limit',
 		'offset',
 		'include-history',
@@ -259,17 +264,23 @@ function command(name: string) {
 		},
 		session: {
 			type: 'string',
-			description: 'Exact session_id copied from sessions output',
+			description:
+				'Session ID, archive ID, or unique native/archive prefix; copy short_id from sessions',
+		},
+		title: {
+			type: 'string',
+			description:
+				'Literal session-title substring (ASCII case-insensitive)',
 		},
 		after: {
 			type: 'string',
 			description:
-				'Inclusive message date lower bound; YYYY-MM-DD starts at midnight UTC',
+				'Inclusive date lower bound (session timestamp for sessions, message timestamp for search/recall); YYYY-MM-DD starts at midnight UTC',
 		},
 		before: {
 			type: 'string',
 			description:
-				'Inclusive message date upper bound; YYYY-MM-DD includes the whole UTC day',
+				'Inclusive date upper bound (session timestamp for sessions, message timestamp for search/recall); YYYY-MM-DD includes the whole UTC day',
 		},
 		'include-history': {
 			type: 'boolean',
@@ -350,6 +361,7 @@ function command(name: string) {
 						'source',
 						'project',
 						'session',
+						'title',
 						'include-history',
 						'limit',
 						'offset',
@@ -394,6 +406,14 @@ function command(name: string) {
 						'arguments',
 						'--kind applies to search/recall only',
 					);
+				if (
+					args.title !== undefined &&
+					!['sessions', 'search', 'recall'].includes(name)
+				)
+					throw new InputError(
+						'arguments',
+						'Title filters apply to sessions/search/recall only',
+					);
 				const options: QueryOptions = {
 					kind:
 						args.kind === 'all'
@@ -403,6 +423,7 @@ function command(name: string) {
 					source: optional(args.source),
 					project: optional(args.project),
 					session: optional(args.session),
+					title: optional(args.title),
 					after: date_filter(args.after),
 					before: date_filter(args.before, true),
 					include_history: Boolean(args['include-history']),
@@ -410,6 +431,16 @@ function command(name: string) {
 					offset: integer(args.offset, 0, 0, 1000000),
 					context: integer(args.context, compact ? 1 : 2, 0, 10),
 				};
+				if (options.title !== undefined && !options.title.trim())
+					throw new InputError(
+						'arguments',
+						'Title filter must not be empty',
+					);
+				if (options.session !== undefined && !options.session.trim())
+					throw new InputError(
+						'arguments',
+						'Session identifier must not be empty',
+					);
 				if (
 					options.after &&
 					options.before &&
@@ -422,11 +453,12 @@ function command(name: string) {
 				if (
 					name !== 'search' &&
 					name !== 'recall' &&
+					name !== 'sessions' &&
 					(options.after || options.before)
 				)
 					throw new InputError(
 						'arguments',
-						'Date filters apply to search/recall only',
+						'Date filters apply to sessions/search/recall only',
 					);
 				const sources: Source[] = [];
 				if (args['claude-root'])
@@ -443,6 +475,7 @@ function command(name: string) {
 				if (
 					name === 'sources' &&
 					(options.project ||
+						options.title ||
 						options.session ||
 						options.include_history)
 				)
@@ -459,6 +492,7 @@ function command(name: string) {
 				if (
 					name === 'sync' &&
 					(options.project ||
+						options.title ||
 						options.session ||
 						options.include_history)
 				)

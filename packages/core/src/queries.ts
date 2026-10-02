@@ -10,10 +10,14 @@ const source_filter = `
 	AND ($source IS NULL OR s.source_id = $source)
 `;
 
-const session_filter = `
+const session_scope = `
 	${source_filter}
 	AND ($project IS NULL OR r.project = $project)
+`;
+const session_filter = `
+	${session_scope}
 	AND ($session IS NULL OR r.session_id = $session)
+	AND ($title IS NULL OR instr(lower(r.title), lower($title)) > 0)
 `;
 
 // Select one path so its location and status always describe the same observation.
@@ -118,6 +122,18 @@ export const sql = {
 		ORDER BY s.source_id
 		LIMIT $limit OFFSET $offset
 	`,
+	session_candidates: `
+		SELECT r.session_id, r.archive_id,
+			(r.session_id = $session OR r.archive_id = $session) AS exact
+		FROM sessions r
+		JOIN sources s USING (source_id)
+		WHERE ${session_scope}
+			AND (r.session_id = $session
+				OR substr(r.archive_id, 1, length($session)) = $session
+				OR substr(r.native_id, 1, length($session)) = $session)
+		ORDER BY exact DESC, r.archive_id
+		LIMIT 2
+	`,
 	sessions: `
 		SELECT
 			r.session_id, r.native_id, s.source_id, s.agent, s.root,
@@ -131,6 +147,8 @@ export const sql = {
 		JOIN sources s USING (source_id)
 		${provenance_join}
 		WHERE ${session_filter}
+			AND ($after IS NULL OR r.timestamp >= $after)
+			AND ($before IS NULL OR r.timestamp <= $before)
 		ORDER BY r.timestamp DESC, r.session_id, r.archive_id
 		LIMIT $limit OFFSET $offset
 	`,

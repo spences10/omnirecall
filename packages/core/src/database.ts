@@ -16,16 +16,20 @@ import {
 
 type SourceFilter = { agent?: Agent; source?: string };
 type PageOptions = { limit: number; offset: number };
-type SessionOptions = SourceFilter &
+type SessionScope = SourceFilter & { project?: string };
+type SessionOptions = SessionScope &
 	PageOptions & {
-		project?: string;
 		session?: string;
+		title?: string;
+		after?: string;
+		before?: string;
 		include_history?: boolean;
 	};
-type SearchOptions = SessionOptions & {
-	kind?: string;
-	after?: string;
-	before?: string;
+type SearchOptions = SessionOptions & { kind?: string };
+type SessionCandidate = {
+	session_id: string;
+	archive_id: string;
+	exact: 0 | 1;
 };
 export type QueryOptions = SearchOptions & { context: number };
 
@@ -87,16 +91,6 @@ function source_parameters(options: SourceFilter) {
 	return {
 		agent: options.agent ?? null,
 		source: options.source ?? null,
-	};
-}
-function session_parameters(options: SessionOptions) {
-	return {
-		...source_parameters(options),
-		project: options.project ?? null,
-		session: options.session ?? null,
-		include_history: Number(Boolean(options.include_history)),
-		limit: options.limit + 1,
-		offset: options.offset,
 	};
 }
 
@@ -421,11 +415,65 @@ export class Archive {
 		}) as SourceSummary[];
 	}
 
-	sessions(
-		options: SessionOptions,
-	): (SessionRecord & { first_record_ref: string | null })[] {
+	#session_candidates(session: string, scope: SessionScope = {}) {
+		return this.#statement(sql.session_candidates).all({
+			...source_parameters(scope),
+			project: scope.project ?? null,
+			session,
+		}) as SessionCandidate[];
+	}
+
+	#resolve_session(options: SessionOptions) {
+		const selector = options.session;
+		if (selector === undefined) return null;
+		if (!selector.trim())
+			throw new InputError(
+				'arguments',
+				'Session identifier must not be empty',
+			);
+		const [first, second] = this.#session_candidates(
+			selector,
+			options,
+		);
+		if (first && second && first.exact === second.exact)
+			throw new InputError(
+				'arguments',
+				'Ambiguous session identifier; use a longer unique prefix, an exact session_id/archive_id, or narrow --agent, --source or --project',
+			);
+		// Preserve empty-result semantics for an unmatched session filter.
+		return first?.session_id ?? selector;
+	}
+
+	#session_parameters(options: SessionOptions) {
+		return {
+			...source_parameters(options),
+			project: options.project ?? null,
+			session: this.#resolve_session(options),
+			title: options.title ?? null,
+			after: options.after ?? null,
+			before: options.before ?? null,
+			include_history: Number(Boolean(options.include_history)),
+			limit: options.limit + 1,
+			offset: options.offset,
+		};
+	}
+
+	#short_session_id(archive_id: string) {
+		// Check the whole archive, not just the displayed page or active filters.
+		for (let length = 12; length < archive_id.length; length++) {
+			const prefix = archive_id.slice(0, length);
+			if (this.#session_candidates(prefix).length === 1)
+				return prefix;
+		}
+		return archive_id;
+	}
+
+	sessions(options: SessionOptions): (SessionRecord & {
+		short_id: string;
+		first_record_ref: string | null;
+	})[] {
 		const { include_history: _history, ...parameters } =
-			session_parameters(options);
+			this.#session_parameters(options);
 		const rows = this.#statement(sql.sessions).all(
 			parameters,
 		) as SessionRecord[];
@@ -435,6 +483,7 @@ export class Archive {
 			).get(row.archive_id);
 			return {
 				...row,
+				short_id: this.#short_session_id(row.archive_id),
 				first_record_ref: first
 					? `r1.${row.archive_id}.${Buffer.from(String(first.record_key)).toString('base64url')}`
 					: null,
@@ -446,11 +495,9 @@ export class Archive {
 		const expression = search_expression(query);
 		try {
 			return this.#statement(sql.search).all({
-				...session_parameters(options),
+				...this.#session_parameters(options),
 				query: expression,
 				kind: options.kind ?? null,
-				after: options.after ?? null,
-				before: options.before ?? null,
 			}) as SearchMatch[];
 		} catch (error) {
 			if (

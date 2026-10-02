@@ -201,6 +201,7 @@ test('search provenance uses indexed session inputs instead of scanning all reso
 				$source: null,
 				$project: null,
 				$session: null,
+				$title: null,
 				$include_history: 0,
 				$kind: null,
 				$after: null,
