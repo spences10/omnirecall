@@ -211,6 +211,120 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 	}
 });
 
+test('search and recall include whole UTC days but preserve exact timestamp bounds', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omnirecall-dates-'));
+	const db = join(root, 'archive.db');
+	const pi_root = join(root, 'pi');
+	try {
+		mkdirSync(pi_root);
+		const stamps = [
+			'2026-09-24T23:59:59.999Z',
+			'2026-09-25T00:00:00.000Z',
+			'2026-09-25T12:00:00.000Z',
+			'2026-09-25T23:59:59.999Z',
+			'2026-09-26T00:00:00.000Z',
+		];
+		writeFileSync(
+			join(pi_root, 'dates.jsonl'),
+			jsonl([
+				pi_records()[0],
+				...stamps.map((timestamp, i) => ({
+					...pi_entry(
+						String(i),
+						i ? String(i - 1) : null,
+						'user',
+						'dateprobe',
+					),
+					timestamp,
+				})),
+			]),
+		);
+		expect(
+			run_cli(['sync', '--pi-root', pi_root, '--db', db, '--json'])
+				.status,
+		).toBe(0);
+		for (const command of ['search', 'recall']) {
+			for (const [bounds, expected] of [
+				[
+					['--after', '2026-09-25', '--before', '2026-09-25'],
+					stamps.slice(1, 4),
+				],
+				[['--before', '2026-09-25'], stamps.slice(0, 4)],
+				[['--after', '2026-09-25'], stamps.slice(1)],
+				[
+					[
+						'--after',
+						'2026-09-25',
+						'--before',
+						'2026-09-25T00:00:00Z',
+					],
+					[stamps[1]],
+				],
+				[
+					[
+						'--after',
+						'2026-09-25T12:00:00Z',
+						'--before',
+						'2026-09-25T12:00:00Z',
+					],
+					[stamps[2]],
+				],
+				[
+					[
+						'--after',
+						'2026-09-25',
+						'--before',
+						'2026-09-25T14:00:00+02:00',
+					],
+					stamps.slice(1, 3),
+				],
+			] as const) {
+				const response = run_cli(
+					[
+						command,
+						'dateprobe',
+						'--db',
+						db,
+						'--json',
+						'--context',
+						'0',
+						'--max-bytes',
+						'65536',
+						...bounds,
+					],
+					{ TZ: 'Pacific/Honolulu' },
+				);
+				expect(response.status, response.stdout).toBe(0);
+				expect(
+					JSON.parse(response.stdout)
+						.results.map(
+							(row: { timestamp: string }) => row.timestamp,
+						)
+						.sort(),
+				).toEqual(expected);
+			}
+			for (const bounds of [
+				['--after', '2026-09-26', '--before', '2026-09-25'],
+				['--after', 'invalid'],
+				['--before', 'invalid'],
+			]) {
+				const response = run_cli([
+					command,
+					'dateprobe',
+					'--db',
+					db,
+					'--json',
+					...bounds,
+				]);
+				expect(response.status).toBe(1);
+				expect(JSON.parse(response.stdout).status).toBe('error');
+			}
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test('compact search, focused reading, and compact recall form a bounded retrieval workflow', () => {
 	const root = mkdtempSync(join(tmpdir(), 'omnirecall-compact-'));
 	const db = join(root, 'archive.db');

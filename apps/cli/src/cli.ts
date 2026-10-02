@@ -91,12 +91,22 @@ function integer(
 function optional(value: unknown): string | undefined {
 	return typeof value === 'string' ? value : undefined;
 }
-function date_filter(value: unknown): string | undefined {
+function date_filter(
+	value: unknown,
+	upper_bound = false,
+): string | undefined {
 	if (value === undefined) return undefined;
 	const parsed = typeof value === 'string' ? Date.parse(value) : NaN;
 	if (!Number.isFinite(parsed))
 		throw new InputError('arguments', 'Invalid date filter');
-	return new Date(parsed).toISOString();
+	const date = new Date(parsed);
+	if (
+		upper_bound &&
+		typeof value === 'string' &&
+		/^\d{4}-\d{2}-\d{2}$/.test(value)
+	)
+		date.setUTCHours(23, 59, 59, 999);
+	return date.toISOString();
 }
 
 const descriptions: Record<string, string> = {
@@ -253,11 +263,13 @@ function command(name: string) {
 		},
 		after: {
 			type: 'string',
-			description: 'Inclusive message date lower bound',
+			description:
+				'Inclusive message date lower bound; YYYY-MM-DD starts at midnight UTC',
 		},
 		before: {
 			type: 'string',
-			description: 'Inclusive message date upper bound',
+			description:
+				'Inclusive message date upper bound; YYYY-MM-DD includes the whole UTC day',
 		},
 		'include-history': {
 			type: 'boolean',
@@ -392,7 +404,7 @@ function command(name: string) {
 					project: optional(args.project),
 					session: optional(args.session),
 					after: date_filter(args.after),
-					before: date_filter(args.before),
+					before: date_filter(args.before, true),
 					include_history: Boolean(args['include-history']),
 					limit: integer(args.limit, compact ? 5 : 10, 1, 100),
 					offset: integer(args.offset, 0, 0, 1000000),

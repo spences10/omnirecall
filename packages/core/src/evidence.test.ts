@@ -1,29 +1,29 @@
 import {
-	mkdtempSync,
-	writeFileSync,
-	rmSync,
 	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from 'vitest';
-import { pi_adapter, parse_pi } from '../../adapter-pi/src/index.ts';
 import { claude_adapter } from '../../adapter-claude/src/index.ts';
 import { codex_adapter } from '../../adapter-codex/src/index.ts';
+import { parse_pi, pi_adapter } from '../../adapter-pi/src/index.ts';
 import { Archive } from './database.ts';
 import { source_config } from './files.ts';
 import {
-	pi_records,
-	pi_entry,
-	timestamp,
-	jsonl,
-	codex_records,
 	codex_entry,
 	codex_item,
+	codex_records,
+	jsonl,
+	pi_entry,
+	pi_records,
+	timestamp,
 } from './fixtures.ts';
+import { focused_read, message_ref, raw_read } from './retrieval.ts';
 import { sync } from './sync.ts';
-import { message_ref, raw_read, focused_read } from './retrieval.ts';
 import type { Adapter } from './types.ts';
 const options = { limit: 100, offset: 0, context: 1 };
 
@@ -206,6 +206,162 @@ test('Claude preserves mixed tool blocks, attachment envelopes and separate suba
 			2000,
 		).results[0]!;
 		expect(raw.content).toContain('opaque_metadata');
+	}));
+
+test('Claude context crosses tool records after reimport and survives source removal', async () =>
+	fixture(async (root, archive) => {
+		const file = join(root, 'claude.jsonl');
+		const rows = Array.from({ length: 7 }, (_, i) => [
+			{
+				type: 'assistant',
+				sessionId: 'claude-context',
+				uuid: `text-${i}`,
+				parentUuid: i ? `result-${i - 1}` : null,
+				timestamp,
+				message: { content: `contextprobe${i}` },
+			},
+			{
+				type: 'assistant',
+				sessionId: 'claude-context',
+				uuid: `call-${i}`,
+				parentUuid: `text-${i}`,
+				timestamp,
+				message: {
+					content: [
+						{
+							type: 'tool_use',
+							id: `tool-${i}`,
+							name: 'Read',
+							input: { file_path: 'test.txt' },
+						},
+					],
+				},
+			},
+			{
+				type: 'user',
+				sessionId: 'claude-context',
+				uuid: `result-${i}`,
+				parentUuid: `call-${i}`,
+				timestamp,
+				message: {
+					content: [
+						{
+							type: 'tool_result',
+							tool_use_id: `tool-${i}`,
+							content: `toolprobe${i}`,
+						},
+					],
+				},
+			},
+		]).flat();
+		writeFileSync(file, jsonl(rows));
+		const source = source_config('claude', root);
+		// Simulate the previous parser's native parents and cached unchanged file.
+		const old_adapter: Adapter = {
+			...claude_adapter,
+			parser_version: claude_adapter.parser_version - 1,
+			async read(unit, previous) {
+				const batch = await claude_adapter.read(unit, previous);
+				for (const session of batch.sessions)
+					for (const message of session.messages)
+						message.parent_id = rows.find(
+							(r) => r.uuid === message.native_id,
+						)!.parentUuid;
+				return batch;
+			},
+		};
+		expect(
+			(await sync(archive, [source], [old_adapter])).status,
+		).toBe('ok');
+		const old = archive.recall('contextprobe3', {
+			...options,
+			context: 3,
+		})[0]!;
+		expect(old.before).toEqual([]);
+		expect(old.after).toEqual([]);
+		expect(
+			await sync(archive, [source], [claude_adapter]),
+		).toMatchObject({
+			status: 'ok',
+			files_indexed: 1,
+			files_skipped: 0,
+		});
+		expect(
+			await sync(archive, [source], [claude_adapter]),
+		).toMatchObject({
+			status: 'ok',
+			files_indexed: 1,
+			files_skipped: 1,
+			sessions_updated: 0,
+		});
+		rmSync(file);
+		await sync(archive, [source], [claude_adapter]);
+		const match = archive.recall('contextprobe3', {
+			...options,
+			context: 3,
+		})[0]!;
+		expect(message_ref(match)).toBe(message_ref(old));
+		expect(match.state).toBe('unknown');
+		expect(match.path_status).toBe('missing');
+		expect(match.before.map((m) => m.content)).toEqual([
+			'contextprobe0',
+			'contextprobe1',
+			'contextprobe2',
+		]);
+		expect(match.after.map((m) => m.content)).toEqual([
+			'contextprobe4',
+			'contextprobe5',
+			'contextprobe6',
+		]);
+		const read = focused_read(
+			archive,
+			message_ref(match),
+			1,
+			0,
+			1000,
+		);
+		expect(read.messages.map((m) => m.content)).toEqual([
+			'contextprobe2',
+			'contextprobe3',
+			'contextprobe4',
+		]);
+		expect(read.results[0]).toMatchObject({
+			previous_ref: message_ref(match.before[1]!),
+			next_ref: message_ref(match.after[1]!),
+		});
+		expect(
+			raw_read(archive, message_ref(match), 0, 2000).results[0]!
+				.content,
+		).toContain('result-2');
+		const tool = archive.search('toolprobe2', options)[0]!;
+		expect(
+			focused_read(archive, message_ref(tool), 1, 0, 1000)
+				.messages[0]!.kind,
+		).toBe('tool_call');
+
+		// A second child of a tool-only record is a branch, not a next message.
+		writeFileSync(
+			file,
+			jsonl([
+				...rows,
+				{
+					type: 'user',
+					sessionId: 'claude-context',
+					uuid: 'sibling',
+					parentUuid: 'result-3',
+					timestamp,
+					message: { content: 'sibling branch' },
+				},
+			]),
+		);
+		await sync(archive, [source], [claude_adapter]);
+		const branch = archive.recall('contextprobe3', options)[0]!;
+		expect(branch.after).toEqual([]);
+		expect(branch.branch_boundary).toBe(true);
+		expect(
+			archive.recall('contextprobe4', options)[0]!.before[0]!
+				.native_id,
+		).toBe('text-3');
 	}));
 
 test('Codex corrections point to the corrected envelope and rolled-back tool-only turns stay historical', async () =>

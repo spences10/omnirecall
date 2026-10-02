@@ -11,7 +11,7 @@ import {
 } from './types.ts';
 
 export const max_file_bytes = 64 * 1024 * 1024;
-export const parser_version = 2;
+export const parser_version = 3;
 
 export function digest(value: string | Buffer): string {
 	return createHash('sha256').update(value).digest('hex');

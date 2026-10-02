@@ -102,6 +102,38 @@ export function parse_claude(
 			turn_id: null,
 		});
 	}
+	// Native parents may be tool-only or metadata records without a searchable
+	// message. Follow their explicit ancestry, never chronological neighbours.
+	const parents = new Map<string, string | null>();
+	for (const { value } of records) {
+		if (typeof value.uuid !== 'string') continue;
+		parents.set(
+			value.uuid,
+			parents.has(value.uuid) || typeof value.parentUuid !== 'string'
+				? null
+				: value.parentUuid,
+		);
+	}
+	const nearest = new Map<string, string | null>(
+		result.messages.map((message) => [
+			message.native_id,
+			message.native_id,
+		]),
+	);
+	for (const message of result.messages) {
+		let parent = message.parent_id;
+		const visited = new Set<string>();
+		while (parent && !nearest.has(parent) && !visited.has(parent)) {
+			visited.add(parent);
+			parent = parents.get(parent) ?? null;
+		}
+		const ancestor =
+			parent && parent !== message.native_id
+				? (nearest.get(parent) ?? null)
+				: null;
+		message.parent_id = ancestor;
+		for (const id of visited) nearest.set(id, ancestor);
+	}
 	preserve_records(records, result, 'claude');
 	if (subagent && result.records?.[0])
 		result.links!.push({
