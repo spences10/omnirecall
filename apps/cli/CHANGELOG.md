@@ -1,5 +1,20 @@
 # omnirecall
 
+## 0.0.5
+
+### Patch Changes
+
+- 6017e48: Reduce compact retrieval duplication, share repeated
+  metadata, expose source paths, and add concise session listings.
+- 2eeb2be: Add read-only OpenCode v2 SQLite imports with searchable
+  conversations, tool evidence, and automatic source discovery.
+- 89a077d: Restore Claude context across tool records and include
+  entire days in date-only upper search bounds.
+- 394afd8: Exclude Codex reviewer context from dialogue searches and
+  automatically quote punctuated terms within FTS expressions.
+- e27f1e7: Add session title and date filters plus concise identifiers
+  with scoped resolution and ambiguity checks.
+
 ## 0.0.4
 
 ### Patch Changes
