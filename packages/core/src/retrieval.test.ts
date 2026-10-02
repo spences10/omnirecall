@@ -7,6 +7,7 @@ import { bounded_json } from './output.ts';
 import {
 	compact_recall,
 	compact_search,
+	compact_sessions,
 	focused_read,
 	message_ref,
 	parse_ref,
@@ -68,6 +69,7 @@ test('compact search keeps a late match with substantially less output and a sta
 		).messages[0]?.content,
 	).toContain('migration');
 	expect(compact[0]).not.toHaveProperty('content');
+	expect(compact[0]?.source_path).toBe('/synthetic/pi/session.jsonl');
 	expect(Buffer.byteLength(JSON.stringify(compact))).toBeLessThan(
 		Buffer.byteLength(JSON.stringify(full)) / 2,
 	);
@@ -165,7 +167,7 @@ test('compact recall deduplicates overlapping context and prunes unreferenced me
 	expect(compact.results).toHaveLength(4);
 	expect(compact.messages).toHaveLength(4);
 	const envelope = {
-		schema_version: 2,
+		schema_version: 3,
 		status: 'ok',
 		...compact,
 		offset: 0,
@@ -201,6 +203,115 @@ test('compact recall deduplicates overlapping context and prunes unreferenced me
 		next_offset: 0,
 		output_budget_exceeded: true,
 	});
+});
+
+test('compact recall carries complete content once but preserves snippets for omitted hits', () => {
+	store([
+		'migration short answer',
+		'🌱 padding '.repeat(1000) + 'migration late answer',
+	]);
+	const compact = compact_recall(
+		archive.recall('migration', options),
+	);
+	const short = compact.results.find((row) => row.char_offset === 0)!;
+	expect(short).not.toHaveProperty('snippet');
+	expect(short).not.toHaveProperty('snippet_truncated');
+	for (const field of [
+		'role',
+		'kind',
+		'state',
+		'representation',
+		'active',
+		'timestamp',
+	])
+		expect(short).not.toHaveProperty(field);
+	expect(
+		compact.messages.find((row) => row.ref === short.ref),
+	).toMatchObject({
+		role: 'user',
+		content: 'migration short answer',
+	});
+	const late = compact.results.find((row) => row.char_offset > 4000)!;
+	expect(late.snippet).toContain('migration late answer');
+	expect(late.source_path).toBe('/synthetic/pi/session.jsonl');
+	expect(
+		compact.messages.find((row) => row.ref === late.ref)?.content,
+	).not.toContain('migration');
+	expect(
+		focused_read(archive, late.ref, 0, late.char_offset, 1200)
+			.messages[0]?.content,
+	).toContain('migration late answer');
+});
+
+test('compact sessions retain usable identifiers and provenance without archive internals', () => {
+	store(['migration']);
+	archive.register(source, 'missing');
+	const detailed = archive.sessions(options);
+	const compact = compact_sessions(detailed);
+	expect(compact[0]).toMatchObject({
+		short_id: detailed[0]!.short_id,
+		source_path: '/synthetic/pi/session.jsonl',
+		source_status: 'missing',
+		unindexed_records: 0,
+		first_record_ref: detailed[0]!.first_record_ref,
+	});
+	for (const key of [
+		'hash',
+		'parser_version',
+		'archive_id',
+		'session_id',
+		'root',
+		'recorded_path',
+	])
+		expect(compact[0]).not.toHaveProperty(key);
+	expect(
+		archive.sessions({
+			...options,
+			session: compact[0]!.short_id,
+		})[0]!.archive_id,
+	).toBe(detailed[0]!.archive_id);
+	expect(Buffer.byteLength(JSON.stringify(compact))).toBeLessThan(
+		Buffer.byteLength(JSON.stringify(detailed)) * 0.7,
+	);
+});
+
+test('schema v3 recall materially reduces repeated metadata without losing message evidence', () => {
+	store(
+		Array.from({ length: 6 }, (_, i) => `migration evidence ${i}`),
+	);
+	const matches = archive.recall('migration', options);
+	const compact = compact_recall(matches);
+	const legacy = {
+		schema_version: 2,
+		results: compact_search(matches).map(
+			({ source_path: _path, ...row }, i) => ({
+				...row,
+				before: compact.results[i]!.before,
+				after: compact.results[i]!.after,
+				branch_boundary: false,
+			}),
+		),
+		messages: compact.messages,
+	};
+	const output = bounded_json(
+		{ schema_version: 3, ...compact },
+		65536,
+	);
+	const parsed = JSON.parse(output);
+	expect(Buffer.byteLength(output)).toBeLessThan(
+		Buffer.byteLength(JSON.stringify(legacy)) * 0.75,
+	);
+	expect(parsed.shared.results.source_path).toBe(
+		'/synthetic/pi/session.jsonl',
+	);
+	expect(
+		parsed.messages.map((row: Record<string, unknown>) => ({
+			...parsed.shared.messages,
+			...row,
+		})),
+	).toEqual(compact.messages);
+	for (const row of parsed.results)
+		expect(row).not.toHaveProperty('snippet');
 });
 
 test('references stay stable across updates and round-trip Unicode and punctuation in native IDs', () => {

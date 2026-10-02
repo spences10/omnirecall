@@ -4,6 +4,7 @@ import type {
 	LocatedMessage,
 	MessageContext,
 	SearchMatch,
+	SessionRecord,
 } from './database.ts';
 import { InputError } from './types.ts';
 
@@ -62,24 +63,44 @@ function compact_message(
 	};
 }
 
-function attribution(message: LocatedMessage) {
+function session_metadata(message: LocatedMessage | SessionRecord) {
 	return {
-		ref: message_ref(message),
 		agent: message.agent,
 		title: message.title?.slice(0, 200) ?? null,
 		title_truncated: (message.title?.length ?? 0) > 200,
 		project: message.project.slice(0, 200),
 		project_truncated: message.project.length > 200,
+		source_path: message.source_path,
+		source_status: message.source_status,
+		source_checked_at: message.source_checked_at,
+		path_status: message.path_status,
+	};
+}
+
+function attribution(message: LocatedMessage) {
+	return {
+		ref: message_ref(message),
+		...session_metadata(message),
 		timestamp: message.timestamp,
 		role: message.role,
 		kind: message.kind ?? 'message',
 		state: message.state ?? (message.active ? 'active' : 'inactive'),
 		representation: message.representation ?? 'primary',
 		active: Boolean(message.active),
-		source_status: message.source_status,
-		source_checked_at: message.source_checked_at,
-		path_status: message.path_status,
 	};
+}
+
+export function compact_sessions(
+	rows: ReturnType<Archive['sessions']>,
+) {
+	return rows.map((row) => ({
+		...session_metadata(row),
+		short_id: row.short_id,
+		timestamp: row.timestamp,
+		parent_session: row.parent_session,
+		unindexed_records: row.unindexed_records,
+		first_record_ref: row.first_record_ref,
+	}));
 }
 
 export function compact_search(matches: SearchMatch[]) {
@@ -98,12 +119,26 @@ export function compact_recall(
 		string,
 		ReturnType<typeof compact_message>
 	>();
-	const results = compact_search(matches).map((result, index) => {
-		const match = matches[index]!;
+	const results = matches.map((match) => {
 		for (const message of [...match.before, match, ...match.after])
 			messages.set(message_ref(message), compact_message(message));
+		const ref = message_ref(match);
+		const message = messages.get(ref)!;
+		// A truncated excerpt may omit the hit entirely. Keep its snippet unless
+		// the returned content actually contains it (including any FTS ellipses).
+		const needs_snippet =
+			message.content_truncated &&
+			!message.content.includes(match.snippet);
 		return {
-			...result,
+			ref,
+			...session_metadata(match),
+			char_offset: match.char_offset,
+			...(needs_snippet
+				? {
+						snippet: Array.from(match.snippet).slice(0, 600).join(''),
+						snippet_truncated: Array.from(match.snippet).length > 600,
+					}
+				: {}),
 			before: match.before.map(message_ref),
 			after: match.after.map(message_ref),
 			branch_boundary: match.branch_boundary,

@@ -13,6 +13,7 @@ import { bounded_json } from '../../../packages/core/src/output.ts';
 import {
 	compact_recall,
 	compact_search,
+	compact_sessions,
 	excerpt_chars,
 	focused_read,
 	parse_ref,
@@ -184,6 +185,7 @@ const command_options: Record<string, string[]> = {
 		'limit',
 		'offset',
 		'include-history',
+		'compact',
 	],
 	read: ['query', 'raw', 'chars', 'char-offset', 'context'],
 };
@@ -202,7 +204,7 @@ function command(name: string) {
 		compact: {
 			type: 'boolean',
 			description:
-				'Search/recall: compact schema v2 output with shared context',
+				'Search/recall/sessions: compact schema v3 output with shared metadata',
 		},
 		'char-offset': {
 			type: 'string',
@@ -326,8 +328,9 @@ function command(name: string) {
 			const compact =
 				name === 'read' ||
 				(name === 'search' && !args.full) ||
-				(name === 'recall' && Boolean(args.compact));
-			const schema_version = compact ? 2 : 1;
+				(['recall', 'sessions'].includes(name) &&
+					Boolean(args.compact));
+			const schema_version = compact ? (name === 'read' ? 2 : 3) : 1;
 			let max_bytes = compact ? 8192 : 65536;
 			try {
 				max_bytes = integer(
@@ -338,12 +341,13 @@ function command(name: string) {
 				);
 				if (
 					(args.full && name !== 'search') ||
-					(args.compact && !['search', 'recall'].includes(name)) ||
+					(args.compact &&
+						!['search', 'recall', 'sessions'].includes(name)) ||
 					(args.full && args.compact)
 				)
 					throw new InputError(
 						'arguments',
-						'--full applies to search; --compact applies to search/recall; choose one',
+						'--full applies to search; --compact applies to search/recall/sessions; choose one',
 					);
 				if (
 					name !== 'read' &&
@@ -614,9 +618,10 @@ function command(name: string) {
 						);
 					} else if (archive) {
 						if (name === 'sources') rows = archive.sources(options);
-						else if (name === 'sessions')
-							rows = archive.sessions(options);
-						else if (name === 'recall') {
+						else if (name === 'sessions') {
+							const sessions = archive.sessions(options);
+							rows = compact ? compact_sessions(sessions) : sessions;
+						} else if (name === 'recall') {
 							const matches = archive.recall(query!, options);
 							if (compact) {
 								const response = compact_recall(matches);

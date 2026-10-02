@@ -533,6 +533,144 @@ test('session discovery combines title/date filters with safe short identifiers'
 	}
 });
 
+test('compact v3 shares provenance, keeps source paths and offers concise session listings', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omnirecall-lean-'));
+	const db = join(root, 'archive.db');
+	const pi_root = join(root, 'pi');
+	const run = (args: string[]) => {
+		const response = run_cli([
+			...args,
+			'--db',
+			db,
+			'--json',
+			'--max-bytes',
+			'65536',
+		]);
+		expect(response.status, response.stdout).toBe(0);
+		return {
+			text: response.stdout,
+			data: JSON.parse(response.stdout),
+		};
+	};
+	const rows = (data: {
+		results: Record<string, unknown>[];
+		shared?: { results?: Record<string, unknown> };
+	}) =>
+		data.results.map((row) => ({ ...data.shared?.results, ...row }));
+	try {
+		mkdirSync(pi_root);
+		for (const id of ['one', 'two'])
+			writeFileSync(
+				join(pi_root, `${id}.jsonl`),
+				jsonl(pi_records(id)),
+			);
+		run(['sync', '--pi-root', pi_root]);
+		const searched = run(['search', 'migrations']);
+		expect(searched.data.schema_version).toBe(3);
+		expect(searched.data.shared.results.agent).toBe('pi');
+		expect(
+			searched.data.results.every(
+				(row: object) => !('source_status' in row),
+			),
+		).toBe(true);
+		expect(
+			rows(searched.data)
+				.map((row) => String(row.source_path))
+				.sort(),
+		).toEqual([
+			join(pi_root, 'one.jsonl'),
+			join(pi_root, 'two.jsonl'),
+		]);
+		const recalled = run([
+			'recall',
+			'migrations',
+			'--compact',
+			'--context',
+			'0',
+		]);
+		expect(recalled.data.schema_version).toBe(3);
+		expect(recalled.data.shared.messages).toMatchObject({
+			state: 'active',
+			active: true,
+			representation: 'primary',
+		});
+		for (const row of recalled.data.results) {
+			expect(row).not.toHaveProperty('snippet');
+			expect(row).not.toHaveProperty('state');
+			const message = recalled.data.messages.find(
+				(m: { ref: string }) => m.ref === row.ref,
+			);
+			expect(message.content).toContain('migrations');
+			expect(message.role).toBe('assistant');
+		}
+		for (const args of [
+			['search', 'migrations', '--full'],
+			['recall', 'migrations'],
+		]) {
+			const detailed = run(args).data;
+			expect(detailed.schema_version).toBe(1);
+			expect(detailed).not.toHaveProperty('shared');
+			expect(detailed.results[0]).toHaveProperty('source_status');
+		}
+		const sessions = run(['sessions', '--compact']);
+		const detailed_sessions = run(['sessions']);
+		expect(sessions.data.schema_version).toBe(3);
+		expect(detailed_sessions.data.schema_version).toBe(1);
+		expect(Buffer.byteLength(sessions.text)).toBeLessThan(
+			Buffer.byteLength(detailed_sessions.text) * 0.75,
+		);
+		for (const row of sessions.data.results) {
+			expect(row).not.toHaveProperty('hash');
+			expect(row).not.toHaveProperty('session_id');
+			expect(
+				run(['search', 'migrations', '--session', row.short_id]).data
+					.results,
+			).toHaveLength(1);
+			const raw = run(['read', row.first_record_ref]).data;
+			expect(raw.schema_version).toBe(2);
+			expect(raw.results[0].content).toContain('"type":"session"');
+		}
+		const limited = run([
+			'sessions',
+			'--compact',
+			'--limit',
+			'1',
+		]).data;
+		expect(limited).toMatchObject({
+			returned_count: 1,
+			has_more: true,
+			next_offset: 1,
+		});
+		expect(limited).not.toHaveProperty('shared');
+		rmSync(join(pi_root, 'one.jsonl'));
+		run(['sync', '--pi-root', pi_root]);
+		const mixed = run(['search', 'migrations']).data;
+		expect(mixed.shared.results).not.toHaveProperty('path_status');
+		expect(
+			rows(mixed)
+				.map((row) => String(row.path_status))
+				.sort(),
+		).toEqual(['available', 'missing']);
+		const missing = rows(mixed).find(
+			(row) => row.path_status === 'missing',
+		)!;
+		const read = run([
+			'read',
+			String(missing.ref),
+			'--context',
+			'0',
+		]).data;
+		expect(read.schema_version).toBe(2);
+		expect(read).not.toHaveProperty('shared');
+		expect(read.results[0].source_path).toBe(
+			join(pi_root, 'one.jsonl'),
+		);
+		expect(read.messages[0].content).toContain('migrations');
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test('compact search, focused reading, and compact recall form a bounded retrieval workflow', () => {
 	const root = mkdtempSync(join(tmpdir(), 'omnirecall-compact-'));
 	const db = join(root, 'archive.db');
@@ -562,7 +700,7 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 		expect(full.status, full.stdout).toBe(0);
 		const hit = JSON.parse(compact.stdout).results[0];
 		expect(JSON.parse(compact.stdout)).toMatchObject({
-			schema_version: 2,
+			schema_version: 3,
 			format: 'compact',
 		});
 		expect(JSON.parse(full.stdout)).toMatchObject({
@@ -608,7 +746,7 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 		const recall = run(['recall', 'database', '--compact']);
 		expect(recall.status, recall.stdout).toBe(0);
 		expect(JSON.parse(recall.stdout)).toMatchObject({
-			schema_version: 2,
+			schema_version: 3,
 			format: 'compact',
 		});
 		expect(JSON.parse(recall.stdout).messages.length).toBeGreaterThan(
@@ -1082,9 +1220,13 @@ test('default search and recall exclude Codex reviewer context while explicit re
 			['recall'],
 			['recall', '--compact'],
 		]) {
-			const results = run([...mode, 'migrations']).results;
-			expect(results).toHaveLength(1);
-			expect(results[0].role).toBe('assistant');
+			const response = run([...mode, 'migrations']);
+			expect(response.results).toHaveLength(1);
+			const result = response.results[0];
+			const message = response.messages?.find(
+				(row: { ref: string }) => row.ref === result.ref,
+			);
+			expect(message?.role ?? result.role).toBe('assistant');
 		}
 		expect(run(['search', 'AGENTS']).results).toHaveLength(0);
 		const copies = run([

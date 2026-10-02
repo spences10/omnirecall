@@ -1,3 +1,55 @@
+const shared_fields = {
+	results: [
+		'agent',
+		'title',
+		'title_truncated',
+		'project',
+		'project_truncated',
+		'source_path',
+		'source_status',
+		'source_checked_at',
+		'path_status',
+		'state',
+		'representation',
+		'active',
+		'parent_session',
+		'unindexed_records',
+	],
+	messages: ['state', 'representation', 'active'],
+};
+
+/** Schema v3 keeps equal metadata once per table; row values override shared values. */
+function shared_metadata(value: Record<string, unknown>) {
+	const result = { ...value };
+	const shared: Record<string, Record<string, unknown>> = {};
+	for (const [table, fields] of Object.entries(shared_fields)) {
+		const rows = value[table] as
+			| Record<string, unknown>[]
+			| undefined;
+		if (!Array.isArray(rows) || rows.length < 2) continue;
+		const common: Record<string, unknown> = {};
+		for (const field of fields) {
+			const first: unknown = rows[0]![field];
+			if (
+				first !== undefined &&
+				rows.every(
+					(row) => Object.hasOwn(row, field) && row[field] === first,
+				)
+			)
+				common[field] = first;
+		}
+		if (!Object.keys(common).length) continue;
+		shared[table] = common;
+		result[table] = rows.map((row) => {
+			const copy = { ...row };
+			for (const field of Object.keys(common)) delete copy[field];
+			return copy;
+		});
+	}
+	if (Object.keys(shared).length) result.shared = shared;
+	return result;
+}
+
 export function bounded_json(
 	value: Record<string, unknown>,
 	max_bytes: number,
@@ -40,7 +92,7 @@ export function bounded_json(
 	const result = clip(value) as Record<string, unknown>;
 	function prune_messages() {
 		if (
-			result.schema_version !== 2 ||
+			(result.schema_version !== 2 && result.schema_version !== 3) ||
 			!Array.isArray(result.messages) ||
 			!Array.isArray(result.results)
 		)
@@ -58,7 +110,11 @@ export function bounded_json(
 	}
 	prune_messages();
 	result.truncated = Boolean(result.truncated) || clipped;
-	let output = JSON.stringify(result);
+	const render = () =>
+		JSON.stringify(
+			result.schema_version === 3 ? shared_metadata(result) : result,
+		);
+	let output = render();
 	while (Buffer.byteLength(output) + 1 > max_bytes) {
 		const rows =
 			Array.isArray(result.results) && result.results.length
@@ -86,7 +142,7 @@ export function bounded_json(
 			if (!result.results.length)
 				result.output_budget_exceeded = true;
 		}
-		output = JSON.stringify(result);
+		output = render();
 	}
 	return output;
 }

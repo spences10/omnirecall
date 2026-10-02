@@ -111,6 +111,58 @@ return updated content or no longer exist. They are not immutable
 historical citations. Raw JSON and contextual reads work entirely from
 the archive.
 
+## Compact output
+
+Default search, `recall --compact`, and `sessions --compact` use
+`schema_version: 3`. This replaces the previous compact search/recall
+schema v2; consumers must check the version. Detailed search
+(`--full`), ordinary recall and ordinary sessions remain schema v1.
+Focused and raw `read` responses remain schema v2. References keep
+their existing exact `m1`/`r1` format and can be passed directly to
+`read`.
+
+Metadata identical across at least two returned rows is stored once in
+optional `shared.results` or `shared.messages` objects. A missing
+shared object means no inherited fields. Decode each table
+independently:
+
+```js
+const results = response.results.map((row) => ({
+	...response.shared?.results,
+	...row,
+}));
+const messages = (response.messages ?? []).map((row) => ({
+	...response.shared?.messages,
+	...row,
+}));
+```
+
+Only equal, present metadata is shared. Mixed agents, locations,
+freshness, missing-source status, unknown/inactive state and
+alternative representations retain their distinct values. Null and
+false values are preserved, not treated as absent. Sharing is
+recalculated after pagination and byte-budget pruning, and
+unreferenced messages are removed. Continuation offsets/counts
+describe the rows actually returned. If no result fits,
+`output_budget_exceeded` remains explicit.
+
+Search results include `source_path` alongside snippets. Compact
+recall results carry provenance, match offsets and context references;
+role, kind, timestamp, state and content live only in `messages`,
+addressed by `ref`. Recall omits a snippet when the returned content
+covers it, but keeps one when a truncated message excerpt may omit the
+hit. For such hits, pass the result's `char_offset` to `read`; message
+continuation still uses `next_char_offset`.
+
+Compact sessions keep `short_id`, title/project, timestamp, source
+path and status, parent identity, unindexed-record count and
+`first_record_ref`. They omit internal hashes, parser versions,
+duplicate paths and long canonical identifiers; use ordinary
+`sessions` for full metadata. Titles/projects remain bounded with
+explicit truncation flags; source paths and references are never
+shortened. All retrieval remains archive-only and reports the last
+explicit sync, not a live source check.
+
 ## Format support
 
 Pi, Claude Code and Codex currently use JSONL readers. Future adapters
