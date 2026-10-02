@@ -215,7 +215,7 @@ function command(name: string) {
 			description:
 				name === 'read'
 					? 'Exact ref copied from search or sessions'
-					: 'FTS5 query: words use AND; "source path", sqlite OR database, migrat*, (a OR b) NOT c. Quote punctuation in expressions.',
+					: 'FTS5 query: words use AND; "source path", sqlite OR database, migrat*, (a OR b) NOT c. Package/path punctuation (- . / @) is quoted automatically.',
 		},
 		db: {
 			type: 'string',
@@ -238,7 +238,7 @@ function command(name: string) {
 		kind: {
 			type: 'string',
 			description:
-				'Evidence kind: message (default), all, reasoning, tool_call, tool_result, summary, operation',
+				'Evidence kind: message (default), all, reasoning, tool_call, tool_result, summary, operation, review_context',
 		},
 		'codex-root': {
 			type: 'string',

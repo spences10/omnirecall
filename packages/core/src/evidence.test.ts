@@ -17,6 +17,7 @@ import {
 	codex_entry,
 	codex_item,
 	codex_records,
+	codex_reviewer_records,
 	jsonl,
 	pi_entry,
 	pi_records,
@@ -362,6 +363,110 @@ test('Claude context crosses tool records after reimport and survives source rem
 			archive.recall('contextprobe4', options)[0]!.before[0]!
 				.native_id,
 		).toBe('text-3');
+	}));
+
+test('Codex reviewer copies stay retrievable without default dialogue hits across syncs', async () =>
+	fixture(async (root, archive) => {
+		const source = source_config('codex', root);
+		const main = join(root, 'main.jsonl');
+		const reviewer = join(root, 'reviewer.jsonl');
+		writeFileSync(main, jsonl(codex_records('main')));
+		const rows = codex_reviewer_records();
+		writeFileSync(reviewer, jsonl(rows));
+		const dialogue = { ...options, kind: 'message' };
+		const contexts = { ...options, kind: 'review_context' };
+		const old_adapter: Adapter = {
+			...codex_adapter,
+			parser_version: codex_adapter.parser_version - 1,
+			async read(unit, previous) {
+				const batch = await codex_adapter.read(unit, previous);
+				for (const session of batch.sessions)
+					for (const part of [
+						...session.messages,
+						...(session.parts ?? []),
+					])
+						if (part.kind === 'review_context') {
+							part.kind = 'message';
+							part.role = 'user';
+						}
+				return batch;
+			},
+		};
+		await sync(archive, [source], [old_adapter]);
+		expect(archive.search('migrations', dialogue)).toHaveLength(2);
+		expect(
+			await sync(archive, [source], [codex_adapter]),
+		).toMatchObject({
+			status: 'ok',
+			files_skipped: 0,
+			sessions_updated: 2,
+		});
+		expect(
+			await sync(archive, [source], [codex_adapter]),
+		).toMatchObject({
+			status: 'ok',
+			files_skipped: 2,
+			sessions_updated: 0,
+		});
+		expect(archive.search('migrations', dialogue)).toHaveLength(1);
+		expect(archive.recall('migrations', dialogue)).toHaveLength(1);
+		expect(archive.search('AGENTS', dialogue)).toEqual([]);
+		expect(archive.search('AGENTS', contexts)).toHaveLength(1);
+		expect(archive.search('decision', dialogue)).toHaveLength(1);
+		const copied = archive.search('migrations', contexts)[0]!;
+		expect(copied).toMatchObject({
+			role: 'context',
+			kind: 'review_context',
+			parent_session: 'main',
+		});
+		const ref = message_ref(copied);
+		rows.push(
+			codex_item(
+				'transcript',
+				'UserMessage',
+				'Updated copied transcript: café migrations safely',
+			),
+		);
+		writeFileSync(reviewer, jsonl(rows));
+		expect(
+			(await sync(archive, [source], [codex_adapter])).status,
+		).toBe('ok');
+		expect(archive.search('migrations', dialogue)).toHaveLength(1);
+		expect(archive.search('migrations', contexts)).toHaveLength(1);
+		expect(
+			archive.search('migrations', {
+				...contexts,
+				include_history: true,
+			}),
+		).toHaveLength(2);
+		expect(
+			focused_read(archive, ref, 0, 0, 1000).messages[0]!.content,
+		).toContain('Updated copied transcript');
+		writeFileSync(
+			reviewer,
+			jsonl([
+				...rows,
+				codex_entry('event_msg', {
+					type: 'item_completed',
+					turn_id: 'turn-1',
+					item: { id: 'bad', type: 'UserMessage', content: 123 },
+				}),
+			]),
+		);
+		expect(
+			(await sync(archive, [source], [codex_adapter])).status,
+		).toBe('partial');
+		expect(archive.search('migrations', contexts)).toHaveLength(1);
+		rmSync(main);
+		rmSync(reviewer);
+		await sync(archive, [source], [codex_adapter]);
+		expect(archive.search('migrations', dialogue)).toHaveLength(1);
+		expect(
+			focused_read(archive, ref, 0, 0, 1000).results[0]!.path_status,
+		).toBe('missing');
+		const raw = raw_read(archive, ref, 0, 2000).results[0]!.content;
+		expect(JSON.parse(raw).payload.item.type).toBe('UserMessage');
+		expect(raw).toContain('Updated copied transcript');
 	}));
 
 test('Codex corrections point to the corrected envelope and rolled-back tool-only turns stay historical', async () =>

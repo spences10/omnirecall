@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, test } from 'vitest';
 import {
 	codex_records,
+	codex_reviewer_records,
 	jsonl,
 	pi_entry,
 	pi_records,
@@ -834,11 +835,88 @@ test('command help exposes only relevant options without a separate guide', () =
 	expect(run_cli(['--help']).stdout).not.toContain('guide');
 });
 
+test('default search and recall exclude Codex reviewer context while explicit reads retain it', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omni-reviewer-'));
+	const db = join(root, 'archive.db');
+	const run = (args: string[]) => {
+		const response = run_cli([
+			...args,
+			'--db',
+			db,
+			'--json',
+			'--max-bytes',
+			'65536',
+		]);
+		expect(response.status, response.stdout).toBe(0);
+		return JSON.parse(response.stdout);
+	};
+	try {
+		writeFileSync(
+			join(root, 'main.jsonl'),
+			jsonl(codex_records('main')),
+		);
+		for (const id of ['reviewer-one', 'reviewer-two'])
+			writeFileSync(
+				join(root, `${id}.jsonl`),
+				jsonl(codex_reviewer_records(id)),
+			);
+		expect(run(['sync', '--codex-root', root]).sessions_updated).toBe(
+			3,
+		);
+		for (const mode of [
+			['search'],
+			['search', '--full'],
+			['recall'],
+			['recall', '--compact'],
+		]) {
+			const results = run([...mode, 'migrations']).results;
+			expect(results).toHaveLength(1);
+			expect(results[0].role).toBe('assistant');
+		}
+		expect(run(['search', 'AGENTS']).results).toHaveLength(0);
+		const copies = run([
+			'search',
+			'migrations',
+			'--kind',
+			'review_context',
+		]).results;
+		expect(copies).toHaveLength(2);
+		expect(
+			copies.every((row: { role: string }) => row.role === 'context'),
+		).toBe(true);
+		expect(
+			run(['search', 'migrations', '--kind', 'all']).results,
+		).toHaveLength(3);
+		expect(
+			run(['read', copies[0].ref]).messages.some(
+				(m: { content: string }) =>
+					m.content.includes('copied transcript'),
+			),
+		).toBe(true);
+		expect(
+			run(['read', copies[0].ref, '--raw']).results[0].content,
+		).toContain('UserMessage');
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test('FTS5 syntax works through search and recall with actionable malformed-query errors', () => {
 	const root = mkdtempSync(join(tmpdir(), 'omni-fts-'));
 	try {
 		const db = join(root, 'archive.db');
-		writeFileSync(join(root, 'session.jsonl'), jsonl(pi_records()));
+		writeFileSync(
+			join(root, 'session.jsonl'),
+			jsonl([
+				...pi_records(),
+				pi_entry(
+					'packages',
+					'u2',
+					'user',
+					'my-pi node.js @scope/pkg packages/core/index.ts deps',
+				),
+			]),
+		);
 		expect(
 			run_cli(['sync', '--pi-root', root, '--db', db, '--json'])
 				.status,
@@ -858,6 +936,22 @@ test('FTS5 syntax works through search and recall with actionable malformed-quer
 			]);
 			expect(result.status, result.stdout).toBe(0);
 			expect(JSON.parse(result.stdout).results).toHaveLength(1);
+			for (const term of [
+				'my-pi',
+				'node.js',
+				'@scope/pkg',
+				'packages/core/index.ts',
+			]) {
+				const punctuated = run_cli([
+					...mode,
+					`${term} AND deps`,
+					'--db',
+					db,
+					'--json',
+				]);
+				expect(punctuated.status, punctuated.stdout).toBe(0);
+				expect(JSON.parse(punctuated.stdout).results).toHaveLength(1);
+			}
 			const invalid = run_cli([
 				...mode,
 				'migration OR',

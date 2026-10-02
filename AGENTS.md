@@ -23,6 +23,11 @@ The implementation and tests define supported shapes:
 can be retained without searchable text; malformed known records can
 still prevent an import.
 
+Codex approval-reviewer user prompts with recognized explicit metadata
+are retained as `review_context`, excluded from default CLI dialogue
+searches. Unknown reviewer metadata is not guessed from content or
+filenames; see [archive design](docs/archive-design.md).
+
 ## Candidates with researched storage
 
 These have no OmniRecall adapter yet. Formats below come from

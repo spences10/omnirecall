@@ -77,6 +77,42 @@ export function codex_item(
 		},
 	});
 }
+// Reviewer prompts are synthetic; only the provenance/envelope shape is native.
+export function codex_reviewer_records(id = 'reviewer') {
+	return [
+		codex_entry('session_meta', {
+			id,
+			cwd: '/synthetic/project',
+			history_mode: 'paginated',
+			source: { subagent: { other: 'guardian' } },
+			parent_thread_id: 'main',
+		}),
+		codex_entry('event_msg', {
+			type: 'task_started',
+			turn_id: 'turn-1',
+		}),
+		codex_item(
+			'instructions',
+			'UserMessage',
+			'# AGENTS.md instructions\n<INSTRUCTIONS>Keep synthetic evidence.</INSTRUCTIONS>',
+		),
+		codex_item(
+			'transcript',
+			'UserMessage',
+			'Review this copied transcript: assistant: Use café migrations safely',
+		),
+		codex_item(
+			'decision',
+			'AgentMessage',
+			'Reviewer decision: allow inspection',
+		),
+		codex_entry('event_msg', {
+			type: 'task_complete',
+			turn_id: 'turn-1',
+		}),
+	];
+}
+
 export function codex_records(
 	id = 'collision',
 	project = '/synthetic/project',

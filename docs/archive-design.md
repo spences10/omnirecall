@@ -68,6 +68,24 @@ active parts. `--include-history` additionally includes inactive parts
 and alternative representations present in the imported records, not
 previous imports.
 
+Codex sessions explicitly marked as approval reviewers classify their
+user-role prompts as `kind: review_context`, `role: context`, not
+human dialogue. Detection recognizes `source.subagent.other` values
+`guardian` and `approval_reviewer`, `source.internal: guardian`, or
+`thread_source: guardian_review`. It does not infer provenance from
+filenames, titles, duplicated text, or AGENTS.md markers. Reviewer
+answers remain dialogue; all original envelopes retain their native
+roles. CLI default searches omit reviewer context;
+`--kind review_context` or `--kind all` includes it. Unknown reviewer
+metadata remains ordinary dialogue rather than risking removal of
+genuine user messages.
+
+The native metadata shapes are documented in Codex's
+[session protocol](https://github.com/openai/codex/blob/2739e828581c3deee59a270cd740675dc278ed14/codex-rs/protocol/src/protocol.rs)
+and
+[Guardian setup](https://github.com/openai/codex/blob/2739e828581c3deee59a270cd740675dc278ed14/codex-rs/core/src/guardian/review_session_setup.rs).
+Fixtures use synthetic content, not developer transcripts.
+
 References address a stored session and part or record key. They
 survive append imports. After rewriting a session, a reference may
 return updated content or no longer exist. They are not immutable

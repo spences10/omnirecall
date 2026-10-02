@@ -14,6 +14,95 @@ function parse(records: unknown[]) {
 	);
 }
 
+test.each([
+	{ source: { subagent: { other: 'guardian' } } },
+	{ source: { subagent: { other: 'approval_reviewer' } } },
+	{ source: { internal: 'guardian' } },
+	{ thread_source: 'guardian_review' },
+])(
+	'classifies reviewer user records using explicit metadata: %j',
+	(metadata) => {
+		const rows = codex_records('reviewer');
+		Object.assign(rows[0]!.payload, metadata, {
+			parent_thread_id: 'parent',
+		});
+		rows.push(
+			codex_item(
+				'u1',
+				'UserMessage',
+				'Corrected embedded transcript',
+			),
+		);
+		const result = parse(rows);
+		expect(result.parent_session).toBe('parent');
+		for (const part of [
+			...result.messages,
+			...(result.parts ?? []),
+		]) {
+			if (part.kind === 'review_context')
+				expect(part.role).toBe('context');
+			expect(part.role).not.toBe('user');
+		}
+		expect(
+			result.messages.filter((m) => m.kind === 'review_context'),
+		).toHaveLength(2);
+		expect(result.parts).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					kind: 'review_context',
+					representation: 'superseded',
+					role: 'context',
+				}),
+			]),
+		);
+		expect(
+			result.messages.find((m) => m.role === 'assistant')?.kind,
+		).toBe('message');
+		expect(result.links).toContainEqual({
+			record_key: '0',
+			kind: 'child_session',
+			namespace: 'session',
+			target: 'parent',
+		});
+		expect(result.records?.at(-1)?.raw_json).toBe(
+			JSON.stringify(rows.at(-1)),
+		);
+	},
+);
+
+test.each([
+	{},
+	{ source: 'cli', thread_name: 'guardian approval_reviewer' },
+	{ source: { subagent: 'review' } },
+	{ source: { subagent: { other: 'custom_reviewer' } } },
+	{
+		source: {
+			subagent: {
+				thread_spawn: {
+					parent_thread_id: 'parent',
+					agent_role: 'guardian',
+				},
+			},
+		},
+	},
+])(
+	'does not infer reviewer provenance from body text or unrelated metadata: %j',
+	(metadata) => {
+		const rows = codex_records();
+		Object.assign(rows[0]!.payload, metadata);
+		rows.push(
+			codex_item(
+				'quoted',
+				'UserMessage',
+				'# AGENTS.md instructions\n<INSTRUCTIONS>guardian approval_reviewer embedded transcript</INSTRUCTIONS>',
+			),
+		);
+		expect(
+			parse(rows).messages.find((m) => m.native_id === 'quoted'),
+		).toMatchObject({ kind: 'message', role: 'user' });
+	},
+);
+
 test('indexes only completed dialogue, not response mirrors/reasoning/compacted replacement history', () => {
 	const result = parse([
 		...codex_records(),

@@ -44,11 +44,32 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		'Codex',
 		records[0]!.byte_offset,
 	);
+	// Approval reviewers receive machine-supplied conversation copies as user
+	// messages. Classify by explicit provenance, never by body text or filename.
+	const source =
+		meta.source &&
+		typeof meta.source === 'object' &&
+		!Array.isArray(meta.source)
+			? object(meta.source)
+			: {};
+	const reviewer_name =
+		source.subagent &&
+		typeof source.subagent === 'object' &&
+		!Array.isArray(source.subagent)
+			? object(source.subagent).other
+			: undefined;
+	const approval_reviewer =
+		reviewer_name === 'guardian' ||
+		reviewer_name === 'approval_reviewer' ||
+		source.internal === 'guardian' ||
+		meta.thread_source === 'guardian_review';
 	const result: Transcript = {
 		native_id: text(meta.id),
 		project: text(meta.cwd),
 		title: metadata(meta.thread_name),
-		parent_session: metadata(meta.forked_from_id),
+		parent_session:
+			metadata(meta.forked_from_id) ??
+			(approval_reviewer ? metadata(meta.parent_thread_id) : null),
 		timestamp: date(header.timestamp),
 		messages: [],
 		unindexed_records: 0,
@@ -281,6 +302,24 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		.filter((t) => !t.active)
 		.map((t) => t.id);
 	const preserved = preserve_records(records, result, 'codex');
+	if (approval_reviewer) {
+		for (const part of [
+			...preserved.messages,
+			...(preserved.parts ?? []),
+		]) {
+			if (part.kind === 'message' && part.role === 'user') {
+				part.kind = 'review_context';
+				part.role = 'context';
+			}
+		}
+		if (typeof meta.parent_thread_id === 'string')
+			preserved.links!.push({
+				record_key: preserved.records![0]!.key,
+				kind: 'child_session',
+				namespace: 'session',
+				target: meta.parent_thread_id,
+			});
+	}
 	if (unknown_state)
 		for (const message of [
 			...preserved.messages,

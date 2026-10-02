@@ -296,6 +296,41 @@ test('FTS5 expressions find phrases, alternatives, prefixes and exclusions safel
 			'package-smoke-needle',
 		]);
 		expect(find('"package-smoke-needle" OR sqlite')).toHaveLength(2);
+		expect(find('package-smoke-needle OR sqlite')).toHaveLength(2);
+		expect(find('package-smoke-need* NOT sqlite')).toEqual([
+			'package-smoke-needle',
+		]);
+		expect(find('NEAR(package-smoke needle, 2)')).toEqual([
+			'package-smoke-needle',
+		]);
+		for (const term of [
+			'my-pi',
+			'node.js',
+			'@scope/pkg',
+			'packages/core/index.ts',
+		]) {
+			archive.store(
+				source,
+				`/test/${term}.jsonl`,
+				{
+					...transcript,
+					native_id: term,
+					messages: [
+						{ ...transcript.messages[0]!, content: `${term} deps` },
+					],
+				},
+				snapshot,
+			);
+			for (const query of [
+				`${term} AND deps`,
+				`(${term} OR absent) NOT sqlite`,
+			]) {
+				expect(find(query)).toEqual([`${term} deps`]);
+				expect(
+					archive.recall(query, options).map((row) => row.content),
+				).toEqual([`${term} deps`]);
+			}
+		}
 		expect(
 			archive.recall('sqlite OR database', options),
 		).toHaveLength(2);
@@ -304,6 +339,11 @@ test('FTS5 expressions find phrases, alternatives, prefixes and exclusions safel
 			'sqlite OR',
 			'(sqlite OR database',
 			'badcolumn:sqlite',
+			'badcolumn:my-pi',
+			'my-pi AND',
+			'(my-pi OR deps',
+			'"unfinished my-pi',
+			'my-pi? AND deps',
 		]) {
 			expect(() => find(query)).toThrow('Invalid FTS5 query');
 		}

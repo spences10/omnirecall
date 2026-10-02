@@ -49,7 +49,13 @@ Run `sync` to pick up new conversations. Add `--json` for structured
 results. Search defaults to conversation messages; use `--kind all` to
 include tool activity. Each command's `--help` lists its options.
 Search supports FTS5 expressions: `"source path"`,
-`sqlite OR database`, and `migrat*`.
+`sqlite OR database`, and `migrat*`. Package/path terms containing
+`-`, `.`, `/`, or `@` are quoted automatically inside expressions, so
+`my-pi AND deps` works without extra quoting.
+
+Codex approval-reviewer context is excluded from default dialogue
+searches. Use `--kind review_context` (or `--kind all`) to find those
+copies, and `read --raw` to inspect their original records.
 
 Supports Pi v3, Codex paginated histories, and Claude Code
 transcripts, including separate subagent sessions. Claude team/task

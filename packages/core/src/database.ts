@@ -4,6 +4,7 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { digest, parser_version } from './files.ts';
 import { sql } from './queries.ts';
 import { apply_schema } from './schema.ts';
+import { search_expression } from './search-query.ts';
 import { parse_cache, type SyncCache } from './sync-cache.ts';
 import {
 	InputError,
@@ -442,17 +443,7 @@ export class Archive {
 	}
 
 	search(query: string, options: SearchOptions): SearchMatch[] {
-		const trimmed = query.trim();
-		// Preserve explicit FTS5 syntax. Ordinary punctuation-containing words
-		// remain literal terms, as they were before expression support.
-		const expression = /["*()^+:]|\b(?:AND|OR|NOT|NEAR)\b/.test(
-			trimmed,
-		)
-			? trimmed
-			: trimmed
-					.split(/\s+/)
-					.map((word) => `"${word}"`)
-					.join(' AND ');
+		const expression = search_expression(query);
 		try {
 			return this.#statement(sql.search).all({
 				...session_parameters(options),
@@ -470,7 +461,7 @@ export class Archive {
 			) {
 				throw new InputError(
 					'arguments',
-					'Invalid FTS5 query. Use balanced double quotes and parentheses, uppercase AND/OR/NOT, or a trailing * for prefixes. Quote punctuation-containing terms inside expressions; see search --help.',
+					'Invalid FTS5 query. Use balanced double quotes and parentheses, uppercase AND/OR/NOT, or a trailing * for prefixes. Package/path terms containing -, ., / or @ are quoted automatically; quote other punctuation explicitly. See search --help.',
 				);
 			}
 			throw error;
