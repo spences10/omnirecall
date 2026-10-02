@@ -13,6 +13,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, test } from 'vitest';
 import {
+	create_fixture as create_opencode,
+	message as opencode_message,
+	put_message as put_opencode_message,
+} from '../../../packages/adapter-opencode/src/fixtures.ts';
+import {
 	codex_records,
 	codex_reviewer_records,
 	jsonl,
@@ -41,6 +46,7 @@ function run_cli(args: string[], env: NodeJS.ProcessEnv = {}) {
 			HOME: isolated_home,
 			USERPROFILE: isolated_home,
 			CODEX_HOME: join(isolated_home, '.codex'),
+			XDG_DATA_HOME: join(isolated_home, '.local', 'share'),
 			NO_COLOR: '1',
 			...env,
 		},
@@ -832,7 +838,7 @@ describe('built CLI', () => {
 		const result = run_cli(['info']);
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain(
-			'Pi, Claude Code and Codex session evidence',
+			'Pi, Claude Code, Codex and OpenCode session evidence',
 		);
 	});
 
@@ -1003,6 +1009,100 @@ test('Claude tool search and raw-record continuation work through the built CLI'
 		]);
 		expect(JSON.parse(next.stdout).results[0].char_offset).toBe(25);
 	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('OpenCode v2 is discovered through XDG and supports CLI retrieval from live WAL storage', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omni-opencode-cli-'));
+	const data = join(root, 'xdg');
+	const opencode_root = join(data, 'opencode');
+	mkdirSync(opencode_root, { recursive: true });
+	const writer = create_opencode(join(opencode_root, 'opencode.db'));
+	const db = join(root, 'archive.db');
+	const env = { XDG_DATA_HOME: data };
+	const run = (args: string[]) => {
+		const response = run_cli([...args, '--db', db, '--json'], env);
+		expect(response.status, response.stdout).toBe(0);
+		return JSON.parse(response.stdout);
+	};
+	try {
+		expect(run(['sync', '--agent', 'opencode'])).toMatchObject({
+			sources_selected: 1,
+			sessions_updated: 1,
+		});
+		expect(run(['sync', '--agent', 'opencode'])).toMatchObject({
+			files_skipped: 1,
+			sessions_updated: 0,
+		});
+		const listed = run([
+			'sessions',
+			'--agent',
+			'opencode',
+			'--title',
+			'migration',
+		]).results[0];
+		expect(listed.source_path).toBe(
+			join(opencode_root, 'opencode.db'),
+		);
+		const hit = run([
+			'search',
+			'opencodeneedle',
+			'--session',
+			listed.short_id,
+		]).results[0];
+		expect(hit.agent).toBe('opencode');
+		const recalled = run([
+			'recall',
+			'opencodeneedle',
+			'--agent',
+			'opencode',
+		]).results[0];
+		expect(recalled.before[0].content).toBe('Prepare the database');
+		expect(recalled.after[0].content).toBe(
+			'Confirm the final checks',
+		);
+		expect(
+			run(['read', hit.ref]).messages.some((m: { content: string }) =>
+				m.content.includes('opencodeneedle'),
+			),
+		).toBe(true);
+		expect(
+			JSON.parse(run(['read', hit.ref, '--raw']).results[0].content)
+				.data.content[0].text,
+		).toContain('opencodeneedle');
+		expect(
+			run(['read', listed.first_record_ref]).results[0].native_type,
+		).toBe('session_v2');
+		expect(run(['search', 'tooloutputneedle']).results).toHaveLength(
+			0,
+		);
+		expect(
+			run(['search', 'tooloutputneedle', '--kind', 'tool_result'])
+				.results,
+		).toHaveLength(1);
+		put_opencode_message(
+			writer,
+			opencode_message(2, 'assistant', {
+				content: [
+					{ type: 'text', text: 'updatedcodexfree OpenCode answer' },
+				],
+			}),
+		);
+		expect(
+			run(['sync', '--opencode-root', opencode_root])
+				.sessions_updated,
+		).toBe(1);
+		expect(run(['search', 'opencodeneedle']).results).toHaveLength(0);
+		expect(
+			run(['read', hit.ref, '--context', '0']).messages[0].content,
+		).toContain('updatedcodexfree');
+		expect(
+			run(['sources', '--opencode-root', opencode_root]).results[0]
+				.agent,
+		).toBe('opencode');
+	} finally {
+		writer.close();
 		rmSync(root, { recursive: true, force: true });
 	}
 });

@@ -10,23 +10,32 @@ supports it.
 
 ## Implemented
 
-| Agent       | History read by OmniRecall                                       | Coverage                                                                                              |
-| ----------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Claude Code | JSONL under `~/.claude/projects`                                 | Transcripts and separate subagent files. Team/task JSON is not imported; branch state is unknown.     |
-| Codex CLI   | JSONL under `~/.codex/sessions` and `~/.codex/archived_sessions` | Paginated histories, including completed text and realtime records. Legacy histories are unsupported. |
-| Pi          | JSONL under `~/.pi/agent/sessions`                               | Version 3 session trees, including messages, tools and branch relationships.                          |
+| Agent       | History read by OmniRecall                                                               | Coverage                                                                                                                                         |
+| ----------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude Code | JSONL under `~/.claude/projects`                                                         | Transcripts and separate subagent files. Team/task JSON is not imported; branch state is unknown.                                                |
+| Codex CLI   | JSONL under `~/.codex/sessions` and `~/.codex/archived_sessions`                         | Paginated histories, including completed text and realtime records. Legacy histories are unsupported.                                            |
+| Pi          | JSONL under `~/.pi/agent/sessions`                                                       | Version 3 session trees, including messages, tools and branch relationships.                                                                     |
+| OpenCode    | SQLite `opencode.db` under `$XDG_DATA_HOME/opencode` (default `~/.local/share/opencode`) | v2 session/message projections, verified against 2.0.22. Legacy SQLite/JSON stores and event replay are unsupported; revert activity is unknown. |
 
 The implementation and tests define supported shapes:
 [Claude adapter](packages/adapter-claude/src/index.ts),
 [Codex adapter](packages/adapter-codex/src/index.ts),
-[Pi adapter](packages/adapter-pi/src/index.ts). Unknown event types
-can be retained without searchable text; malformed known records can
-still prevent an import.
+[Pi adapter](packages/adapter-pi/src/index.ts),
+[OpenCode adapter](packages/adapter-opencode/src/index.ts). Unknown
+event types can be retained without searchable text; malformed known
+records can still prevent an import.
 
 Codex approval-reviewer user prompts with recognized explicit metadata
 are retained as `review_context`, excluded from default CLI dialogue
 searches. Unknown reviewer metadata is not guessed from content or
 filenames; see [archive design](docs/archive-design.md).
+
+OpenCode's v2 schema was verified on 2 October 2026 against native
+2.0.22 storage and pinned upstream schemas. Reads use consistent,
+read-only SQLite snapshots including committed WAL data; fixtures are
+synthetic. See
+[OpenCode storage](docs/archive-design.md#opencode-storage) for update
+handling and known gaps.
 
 ## Candidates with researched storage
 
@@ -35,19 +44,18 @@ These have no OmniRecall adapter yet. Formats below come from
 and its linked connector implementations. Verify against the target
 agent version and synthetic fixtures before implementing support.
 
-| Agent                            | Reported history format                                                                                              | Import consideration                                                                                                                                                    |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenCode                         | SQLite `opencode.db`; older versions use separate session/message/part JSON files                                    | One session can span multiple files or database tables. [Connector](https://github.com/Dicklesworthstone/franken_agent_detection/blob/main/src/connectors/opencode.rs). |
-| Antigravity CLI (`agy`)          | `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl`, with conversation SQLite databases | Keep CLI and IDE stores distinct.                                                                                                                                       |
-| Gemini CLI (historical sessions) | Chat JSON under `~/.gemini/tmp`                                                                                      | Retain as a separate format target from Antigravity CLI.                                                                                                                |
-| OpenHands                        | Conversation directories with `base_state.json` and individual event JSON files                                      | Assemble metadata and ordered events.                                                                                                                                   |
-| Cline                            | Task directories with `ui_messages.json`, `api_conversation_history.json` and metadata                               | UI and API histories can overlap. [Connector](https://github.com/Dicklesworthstone/franken_agent_detection/blob/main/src/connectors/cline.rs).                          |
-| Goose                            | SQLite `sessions.db`; older per-session JSONL files                                                                  | Detect the storage generation.                                                                                                                                          |
-| Aider                            | `.aider.chat.history.md` Markdown logs                                                                               | Extract conversation text without assuming JSON records.                                                                                                                |
-| Crush                            | SQLite `crush.db`, including per-project locations                                                                   | Discover both global and project stores.                                                                                                                                |
-| Qwen Code                        | `~/.qwen/tmp/*/chats/session-*.json`                                                                                 | Read chat JSON documents.                                                                                                                                               |
-| Grok Build (`grok`)              | `updates.jsonl`, `summary.json` and a `chat_history.jsonl` fallback                                                  | Identify the authoritative stream and avoid importing fallback duplicates.                                                                                              |
-| Copilot CLI                      | JSONL/JSON in `~/.copilot/session-state` and legacy locations                                                        | Keep CLI histories distinct from Copilot Chat editor storage.                                                                                                           |
+| Agent                            | Reported history format                                                                                              | Import consideration                                                                                                                           |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Antigravity CLI (`agy`)          | `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl`, with conversation SQLite databases | Keep CLI and IDE stores distinct.                                                                                                              |
+| Gemini CLI (historical sessions) | Chat JSON under `~/.gemini/tmp`                                                                                      | Retain as a separate format target from Antigravity CLI.                                                                                       |
+| OpenHands                        | Conversation directories with `base_state.json` and individual event JSON files                                      | Assemble metadata and ordered events.                                                                                                          |
+| Cline                            | Task directories with `ui_messages.json`, `api_conversation_history.json` and metadata                               | UI and API histories can overlap. [Connector](https://github.com/Dicklesworthstone/franken_agent_detection/blob/main/src/connectors/cline.rs). |
+| Goose                            | SQLite `sessions.db`; older per-session JSONL files                                                                  | Detect the storage generation.                                                                                                                 |
+| Aider                            | `.aider.chat.history.md` Markdown logs                                                                               | Extract conversation text without assuming JSON records.                                                                                       |
+| Crush                            | SQLite `crush.db`, including per-project locations                                                                   | Discover both global and project stores.                                                                                                       |
+| Qwen Code                        | `~/.qwen/tmp/*/chats/session-*.json`                                                                                 | Read chat JSON documents.                                                                                                                      |
+| Grok Build (`grok`)              | `updates.jsonl`, `summary.json` and a `chat_history.jsonl` fallback                                                  | Identify the authoritative stream and avoid importing fallback duplicates.                                                                     |
+| Copilot CLI                      | JSONL/JSON in `~/.copilot/session-state` and legacy locations                                                        | Keep CLI histories distinct from Copilot Chat editor storage.                                                                                  |
 
 Google announced the
 [transition from Gemini CLI to Antigravity CLI](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).

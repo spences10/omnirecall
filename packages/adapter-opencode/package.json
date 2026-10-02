@@ -1,0 +1,5 @@
+{
+	"name": "@omnirecall/adapter-opencode",
+	"private": true,
+	"type": "module"
+}

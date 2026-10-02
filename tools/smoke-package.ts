@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { create_fixture as create_opencode } from '../packages/adapter-opencode/src/fixtures.ts';
 
 const root = resolve(import.meta.dirname, '..');
 const scratch = mkdtempSync(join(tmpdir(), 'omnirecall-package-'));
@@ -118,8 +119,38 @@ try {
 	assert.equal(hits.length, 1);
 	assert.equal(hits[0].agent, 'pi');
 	assert.ok(JSON.stringify(hits[0]).includes('package-smoke-needle'));
+	const opencode_root = join(home, '.local', 'share', 'opencode');
+	mkdirSync(opencode_root, { recursive: true });
+	const opencode = create_opencode(
+		join(opencode_root, 'opencode.db'),
+	);
+	try {
+		assert.equal(
+			cli(['sync', '--agent', 'opencode']).sessions_updated,
+			1,
+		);
+		assert.equal(
+			cli(['sync', '--agent', 'opencode']).files_skipped,
+			1,
+		);
+		const hit = cli([
+			'search',
+			'opencodeneedle',
+			'--agent',
+			'opencode',
+		]).results[0];
+		assert.equal(hit.agent, 'opencode');
+		assert.ok(
+			cli(['read', hit.ref]).messages.some(
+				(row: { content: string }) =>
+					row.content.includes('opencodeneedle'),
+			),
+		);
+	} finally {
+		opencode.close();
+	}
 	console.log(
-		'Packed package: isolated install, sync, repeat sync and search passed.',
+		'Packed package: isolated install, Pi/OpenCode sync, repeat sync, search and read passed.',
 	);
 } finally {
 	rmSync(scratch, { recursive: true, force: true });

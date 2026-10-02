@@ -7,10 +7,10 @@
 Find answers in your past coding conversations—even when they happened
 in a different agent.
 
-OmniRecall searches Pi, Codex, and Claude Code session histories in
-one local archive. Recover a decision, find a command that worked, or
-give your current assistant the context it needs to continue earlier
-work.
+OmniRecall searches Pi, Codex, Claude Code, and OpenCode session
+histories in one local archive. Recover a decision, find a command
+that worked, or give your current assistant the context it needs to
+continue earlier work.
 
 ![Example coding assistant conversation using OmniRecall to recover a fix from a previous Pi session](https://raw.githubusercontent.com/spences10/omnirecall/main/assets/omnirecall-package-preview.png)
 
@@ -90,6 +90,27 @@ on schema v1; `read` stays on schema v2. See
 [the output contract](https://github.com/spences10/omnirecall/blob/main/docs/archive-design.md#compact-output)
 for decoding shared metadata.
 
-Supports Pi v3, Codex paginated histories, and Claude Code
-transcripts, including separate subagent sessions. Claude team/task
-files and legacy Codex histories are not currently supported.
+Supports Pi v3, Codex paginated histories, Claude Code transcripts
+(including separate subagent sessions), and OpenCode v2 SQLite session
+projections verified against OpenCode 2.0.22. Claude team/task files,
+legacy Codex histories, and older OpenCode SQLite/JSON layouts are not
+supported.
+
+### OpenCode
+
+Sync automatically discovers `$XDG_DATA_HOME/opencode/opencode.db`,
+defaulting to `~/.local/share/opencode/opencode.db`. To select
+OpenCode or use a different data directory:
+
+```bash
+pnpx omnirecall sync --agent opencode
+pnpx omnirecall sync --opencode-root /path/to/opencode
+pnpx omnirecall search "migration" --agent opencode
+```
+
+The source database is opened read-only, including committed WAL data.
+Imports retain conversation text, reasoning, tool calls/results and
+original session/message rows. Streaming updates are picked up on the
+next sync; malformed input retains the last successful import. Revert
+activity is marked unknown rather than guessing the active branch.
+Event-log replay and pending inbox messages are not imported.

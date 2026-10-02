@@ -165,11 +165,60 @@ explicit sync, not a live source check.
 
 ## Format support
 
-Pi, Claude Code and Codex currently use JSONL readers. Future adapters
-can read JSON documents or databases and produce the same core import
-result. A resume checkpoint is optional; an adapter can simply reread
-a changed session. Agent-specific ordering, content and identity
-belong in adapters.
+Pi, Claude Code and Codex use JSONL readers; OpenCode uses read-only
+SQLite snapshots. Both produce the same core import result. A resume
+checkpoint is optional; an adapter can simply reread a changed
+session. Agent-specific ordering, content and identity belong in
+adapters.
 
 Schema baseline and future migration registration are described beside
 [the migration runner](../packages/core/src/migrations/README.md).
+
+### OpenCode storage
+
+The OpenCode adapter reads `session_v2` and `session_message`
+projections from `opencode.db`, verified against OpenCode **2.0.22**.
+The contract comes from the pinned upstream
+[SQLite tables](https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/core/src/session/sql.ts),
+[message schema](https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/schema/src/session-message.ts),
+and
+[history reader](https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/core/src/session/history.ts).
+Legacy `session`/`message`/`part` tables and per-record JSON
+directories are explicitly unsupported. The adapter does not migrate
+source stores.
+
+One import unit represents one session within one database path.
+Read-only transactions provide consistent views including committed
+WAL data. Content fingerprints cover the complete session row and all
+its message rows; they detect appends, same-sequence streaming
+updates, title changes and deletions even without timestamp changes.
+Sync checks the fingerprint again before storing and retains the prior
+import if the source changed. Unchanged sessions skip parsing/storage,
+but still require reading their projected rows for hashing; this is
+not a constant-time scan. Each session is limited to 64 MiB of
+serialized rows and 100,000 message records.
+
+Messages are ordered by native `seq`, with dialogue context linked
+across intervening tool-only/control records. User/assistant text is
+searchable by default; reasoning, tool calls/results, shell
+operations, summaries and injected context are separate evidence
+kinds. Running assistant/tool evidence has `state: in_progress`;
+revert metadata or unfamiliar semantics produce `state: unknown`.
+Fork/subagent parent links are retained without inferring
+cross-session active branches or reconstructing a model's compacted
+context window.
+
+Raw records retain every selected row column. A message's SQLite
+`data` column is unpacked into its native JSON object, preserving its
+JSON bytes so pointers such as `/data/content` address the archived
+record. Attachments and unfamiliar content remain raw rather than
+being guessed into conversation text. The adapter does not read
+account/credential tables, replay the event log, or import pending
+inbox entries.
+
+Reimports replace the stored projection, not a revision history.
+Removed message rows disappear from the next successful session
+import; a session removed entirely from the source retains its last
+archived copy. Database removal likewise leaves imported content
+retrievable. File counters count per-session import inputs, so
+multiple sessions can refer to the same physical database path.

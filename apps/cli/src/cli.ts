@@ -3,6 +3,7 @@ import { constants, existsSync, readFileSync } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { claude_adapter } from '../../../packages/adapter-claude/src/index.ts';
 import { codex_adapter } from '../../../packages/adapter-codex/src/index.ts';
+import { opencode_adapter } from '../../../packages/adapter-opencode/src/index.ts';
 import { pi_adapter } from '../../../packages/adapter-pi/src/index.ts';
 import {
 	Archive,
@@ -65,7 +66,7 @@ const info = defineCommand({
 		console.log(
 			args.json
 				? JSON.stringify(result)
-				: `${result.name} v${result.version}\nPreview: Pi, Claude Code and Codex session evidence; durable local archive.\n${result.agent_instructions}`,
+				: `${result.name} v${result.version}\nPreview: Pi, Claude Code, Codex and OpenCode session evidence; durable local archive.\n${result.agent_instructions}`,
 		);
 	},
 });
@@ -128,6 +129,7 @@ const command_options: Record<string, string[]> = {
 		'pi-root',
 		'claude-root',
 		'codex-root',
+		'opencode-root',
 		'agent',
 		'source',
 		'limit',
@@ -137,6 +139,7 @@ const command_options: Record<string, string[]> = {
 		'pi-root',
 		'claude-root',
 		'codex-root',
+		'opencode-root',
 		'agent',
 		'source',
 		'verbose',
@@ -245,16 +248,21 @@ function command(name: string) {
 		kind: {
 			type: 'string',
 			description:
-				'Evidence kind: message (default), all, reasoning, tool_call, tool_result, summary, operation, review_context',
+				'Evidence kind: message (default), all, reasoning, tool_call, tool_result, summary, operation, context, review_context',
 		},
 		'codex-root': {
 			type: 'string',
 			description: 'Explicit Codex JSONL tree root',
 		},
+		'opencode-root': {
+			type: 'string',
+			description:
+				'OpenCode data directory containing a v2 opencode.db',
+		},
 		agent: {
 			type: 'string',
 			description:
-				'Authoring agent: pi, codex, or claude (not the caller)',
+				'Authoring agent: pi, codex, claude, or opencode (not the caller)',
 		},
 		source: {
 			type: 'string',
@@ -389,11 +397,12 @@ function command(name: string) {
 					agent !== undefined &&
 					agent !== 'pi' &&
 					agent !== 'codex' &&
-					agent !== 'claude'
+					agent !== 'claude' &&
+					agent !== 'opencode'
 				)
 					throw new InputError(
 						'arguments',
-						'--agent must be pi, codex, or claude',
+						'--agent must be pi, codex, claude, or opencode',
 					);
 				if (args.raw && name !== 'read')
 					throw new InputError(
@@ -471,6 +480,10 @@ function command(name: string) {
 					sources.push(source_config('pi', args['pi-root']));
 				if (args['codex-root'])
 					sources.push(source_config('codex', args['codex-root']));
+				if (args['opencode-root'])
+					sources.push(
+						source_config('opencode', args['opencode-root']),
+					);
 				if (sources.length && name !== 'sources' && name !== 'sync')
 					throw new InputError(
 						'arguments',
@@ -538,7 +551,12 @@ function command(name: string) {
 					const synced = await sync(
 						archive!,
 						selected,
-						[pi_adapter, codex_adapter, claude_adapter],
+						[
+							pi_adapter,
+							codex_adapter,
+							claude_adapter,
+							opencode_adapter,
+						],
 						progress?.update,
 					);
 					progress?.finish();

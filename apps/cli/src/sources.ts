@@ -1,13 +1,14 @@
 import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, relative, isAbsolute } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import type { Archive } from '../../../packages/core/src/database.ts';
 import { source_config } from '../../../packages/core/src/files.ts';
 import type { Source } from '../../../packages/core/src/types.ts';
 
-async function present(path: string): Promise<boolean> {
+async function present(path: string, file = false): Promise<boolean> {
 	try {
-		return (await stat(path)).isDirectory();
+		const info = await stat(path);
+		return file ? info.isFile() : info.isDirectory();
 	} catch (error) {
 		// Let sync report inaccessible locations rather than calling them absent.
 		return !['ENOENT', 'ENOTDIR'].includes(
@@ -52,6 +53,12 @@ export async function automatic_sources(
 		(await present(join(codex, 'archived_sessions')))
 	)
 		candidates.push(source_config('codex', codex));
+	const opencode = join(
+		process.env.XDG_DATA_HOME || join(home, '.local', 'share'),
+		'opencode',
+	);
+	if (await present(join(opencode, 'opencode.db'), true))
+		candidates.push(source_config('opencode', opencode));
 	for (const candidate of candidates) {
 		if (
 			configured.some(
