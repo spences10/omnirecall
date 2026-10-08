@@ -45,10 +45,30 @@ const provenance_columns = `
 	COALESCE(p.status, 'superseded') AS path_status
 `;
 
+// Session, source and provenance columns that locate a part.
+const located_columns = `
+	r.session_id, s.source_id, s.agent, s.root,
+	s.status AS source_status, s.checked_at AS source_checked_at,
+	r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
+	${provenance_columns}
+`;
+
+// Inactive branches and alternative representations are history.
+const current_filter = `
+	($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+`;
+
+// A user prompt on the branch being read: where a turn starts.
+const turn_prompt = `
+	m.archive_id = $archive_id AND m.active = $active
+	AND m.representation = 'primary'
+	AND m.kind = 'message' AND m.role = 'user'
+`;
+
 const match_filter = `
 	parts_fts MATCH $query
 	AND ${session_filter}
-	AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+	AND ${current_filter}
 	AND ($kind IS NULL OR m.kind = $kind)
 	AND ($after IS NULL OR m.timestamp >= $after)
 	AND ($before IS NULL OR m.timestamp <= $before)
@@ -57,11 +77,7 @@ const match_filter = `
 const search_rows = (filter = '') => `
 	SELECT
 		${message_columns()},
-		r.session_id, s.source_id, s.agent, s.root,
-		s.status AS source_status, s.checked_at AS source_checked_at,
-		r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
-
-		${provenance_columns},
+		${located_columns},
 		substr(snippet(parts_fts, 0, '', '', '…', 32), 1, 4000) AS snippet,
 		max(0, instr(m.content, snippet(parts_fts, 0, '', '', '', 32)) - 1) AS char_offset,
 		bm25(parts_fts) AS relevance
@@ -230,7 +246,7 @@ export const sql = {
 		SELECT ${message_columns('1', '400')}
 		FROM parts m
 		WHERE m.archive_id = $archive_id
-			AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+			AND ${current_filter}
 			AND ((m.kind = 'message' AND m.role = 'user') OR m.kind = 'summary')
 		ORDER BY m.source_order, m.native_id
 		LIMIT $limit OFFSET $offset
@@ -239,7 +255,7 @@ export const sql = {
 		SELECT m.kind, count(*) AS count
 		FROM parts m
 		WHERE m.archive_id = $archive_id
-			AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+			AND ${current_filter}
 		GROUP BY m.kind
 		ORDER BY m.kind
 	`,
@@ -247,9 +263,7 @@ export const sql = {
 	turn_start: `
 		SELECT ${message_columns('1', '400')}
 		FROM parts m
-		WHERE m.archive_id = $archive_id AND m.active = $active
-			AND m.representation = 'primary'
-			AND m.kind = 'message' AND m.role = 'user'
+		WHERE ${turn_prompt}
 			AND m.source_order <= $source_order
 		ORDER BY m.source_order DESC, m.native_id
 		LIMIT 1
@@ -257,9 +271,7 @@ export const sql = {
 	turn_end: `
 		SELECT ${message_columns('1', '400')}
 		FROM parts m
-		WHERE m.archive_id = $archive_id AND m.active = $active
-			AND m.representation = 'primary'
-			AND m.kind = 'message' AND m.role = 'user'
+		WHERE ${turn_prompt}
 			AND m.source_order > $source_order
 		ORDER BY m.source_order, m.native_id
 		LIMIT 1
@@ -278,11 +290,7 @@ export const sql = {
 	read_message: `
 		SELECT ${message_columns('$char_offset + 1', '$chars')},
 			length(m.content) AS content_length,
-			r.session_id, s.source_id, s.agent, s.root,
-			s.status AS source_status, s.checked_at AS source_checked_at,
-			r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
-
-			${provenance_columns}
+			${located_columns}
 		FROM parts m
 		JOIN sessions r USING (archive_id)
 		JOIN sources s USING (source_id)
