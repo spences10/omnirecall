@@ -1,61 +1,57 @@
 import { tally_unindexed } from '../../adapter-shared/src/evidence.ts';
 import {
+	opencode_assistant_schema,
+	opencode_block_schema,
+	opencode_compaction_schema,
+	opencode_row_schema,
+	opencode_session_schema,
+	opencode_shell_schema,
+	opencode_text_schema,
+	opencode_tool_schema,
+	opencode_tool_state_schema,
+	opencode_user_schema,
+	validate_row,
+	type Schema,
+} from '../../adapter-shared/src/schemas.ts';
+import {
 	all_parts,
 	InputError,
-	metadata,
-	object,
-	text,
 	type Adapter,
-	type JsonObject,
 	type Message,
 	type Transcript,
 } from '../../core/src/types.ts';
+import { validate } from '../../core/src/validation.ts';
 import { discover, snapshot, type Snapshot } from './storage.ts';
 
-function invalid(field: string): never {
-	throw new InputError('invalid', `OpenCode: invalid field ${field}`);
-}
-function string(value: unknown, field: string): string {
-	if (typeof value !== 'string') invalid(field);
-	return value;
-}
-function integer(value: unknown, field: string): number {
-	if (!Number.isSafeInteger(value) || Number(value) < 0)
-		invalid(field);
-	return Number(value);
-}
-function timestamp(value: unknown, field: string): string {
-	const date = new Date(integer(value, field));
-	if (!Number.isFinite(date.getTime())) invalid(field);
-	return date.toISOString();
-}
-function json(value: unknown, field: string): JsonObject {
-	try {
-		return object(JSON.parse(string(value, field)));
-	} catch {
-		return invalid(field);
-	}
-}
-function array(value: unknown, field: string): unknown[] {
-	if (!Array.isArray(value)) invalid(field);
-	return value;
-}
+// Unknown values in these positions are retained with unknown state.
+const tool_statuses = ['streaming', 'running', 'completed', 'error'];
+const context_types = ['system', 'synthetic', 'skill'];
+const passive_types = [
+	'idle',
+	'agent-switched',
+	'model-switched',
+	'location-switched',
+];
+
+const iso = (milliseconds: number) =>
+	new Date(milliseconds).toISOString();
 
 /** Interpret v2 projection rows, not the event log or the frozen v1 tables. */
 export function parse_opencode(
 	input: Pick<Snapshot, 'session' | 'messages'>,
 ): Transcript {
-	const s = input.session;
-	const id = text(s.id);
-	const created = timestamp(s.time_created, 'session.time_created');
-	timestamp(s.time_updated, 'session.time_updated');
-	text(s.version);
+	const s = validate(
+		opencode_session_schema,
+		input.session,
+		'OpenCode session',
+	);
+	const id = s.id;
+	const created = iso(s.time_created);
 	const result: Transcript = {
 		native_id: id,
-		project: string(s.directory, 'session.directory'),
-		title: metadata(s.title),
-		parent_session:
-			metadata(s.parent_id) ?? metadata(s.fork_session_id),
+		project: s.directory,
+		title: s.title ?? null,
+		parent_session: s.parent_id ?? s.fork_session_id ?? null,
 		timestamp: created,
 		messages: [],
 		parts: [],
@@ -68,7 +64,7 @@ export function parse_opencode(
 				native_type: 'session_v2',
 				timestamp: created,
 				source_order: 0,
-				raw_json: JSON.stringify(s),
+				raw_json: JSON.stringify(input.session),
 			},
 		],
 	};
@@ -84,35 +80,38 @@ export function parse_opencode(
 				target,
 			});
 	}
-	if (s.fork_boundary != null)
-		json(s.fork_boundary, 'session.fork_boundary');
 	// Revert's effective model-history boundary is not inferred from projection
 	// order. Keep the evidence visible, but make its activity explicitly unknown.
 	let unknown_state = s.revert != null;
-	if (s.revert != null) json(s.revert, 'session.revert');
 	let previous: string | null = null;
 	let previous_seq = -1;
 	const ids = new Set<string>();
-	for (const [index, row] of input.messages.entries()) {
-		const message_id = text(row.id),
-			type = text(row.type);
-		if (row.session_id !== id) invalid('message.session_id');
-		const seq = integer(row.seq, 'message.seq');
-		if (seq <= previous_seq || ids.has(message_id))
+	for (const [index, native] of input.messages.entries()) {
+		const order = index + 1;
+		const row = validate_row(
+			opencode_row_schema,
+			native,
+			'OpenCode message',
+			order,
+		);
+		const { id: message_id, type, data } = row;
+		if (native.session_id !== id)
+			throw new InputError(
+				'invalid',
+				`OpenCode message row ${order}: invalid field session_id`,
+			);
+		if (row.seq <= previous_seq || ids.has(message_id))
 			throw new InputError(
 				'unsupported',
 				'OpenCode message IDs and sequence order must be unique',
 			);
-		previous_seq = seq;
+		previous_seq = row.seq;
 		ids.add(message_id);
-		const stamp = timestamp(row.time_created, 'message.time_created');
-		timestamp(row.time_updated, 'message.time_updated');
-		const data = json(row.data, 'message.data');
+		const stamp = iso(row.time_created);
 		const key = `message:${message_id}`;
-		const order = index + 1;
 		// Unpack the native JSON column while retaining its exact JSON bytes and
 		// every other SQLite column, so pointers address the archived data directly.
-		const { data: raw_data, ...columns } = row;
+		const { data: raw_data, ...columns } = native;
 		result.records!.push({
 			key,
 			native_id: message_id,
@@ -125,6 +124,12 @@ export function parse_opencode(
 				raw_data +
 				'}',
 		});
+		const check = <S extends Schema>(
+			schema: S,
+			value: unknown,
+			subject: string,
+		) => validate_row(schema, value, `OpenCode ${subject}`, order);
+		let in_progress = false;
 		const add = (
 			kind: string,
 			role: string,
@@ -150,37 +155,29 @@ export function parse_opencode(
 				record_key: key,
 				json_pointer: pointer,
 			};
-			if (
-				type === 'assistant' &&
-				object(data.time).completed === undefined
-			)
-				part.state = 'in_progress';
+			if (in_progress) part.state = 'in_progress';
 			(kind === 'message' ? result.messages : result.parts!).push(
 				part,
 			);
 			return part;
 		};
-		if (['user', 'assistant'].includes(type)) {
-			const time = object(data.time);
-			timestamp(time.created, 'message.data.time.created');
-			if (time.completed !== undefined)
-				timestamp(time.completed, 'message.data.time.completed');
-		}
 		if (type === 'user') {
-			const message = add(
-				'message',
-				'user',
-				string(data.text, 'user.text'),
-				'/data/text',
-			);
+			const user = check(opencode_user_schema, data, 'user message');
+			const message = add('message', 'user', user.text, '/data/text');
 			if (message) previous = message.native_id;
 		} else if (type === 'assistant') {
-			const content = array(data.content, 'assistant.content').map(
-				object,
+			const { content, time } = check(
+				opencode_assistant_schema,
+				data,
+				'assistant message',
 			);
+			in_progress = time.completed === undefined;
 			const dialogue = content
 				.filter((block) => block.type === 'text')
-				.map((block) => string(block.text, 'assistant.content.text'))
+				.map(
+					(block) =>
+						check(opencode_text_schema, block, 'text block').text,
+				)
 				.join('\n');
 			const message = add(
 				'message',
@@ -197,134 +194,127 @@ export function parse_opencode(
 					add(
 						'reasoning',
 						'assistant',
-						string(block.text, 'reasoning.text'),
+						check(opencode_text_schema, block, 'reasoning block')
+							.text,
 						`${pointer}/text`,
 					);
 				} else if (block.type === 'tool') {
-					const call_id = text(block.id),
-						name = text(block.name),
-						state = object(block.state);
-					if (calls.has(call_id))
+					const tool = check(
+						opencode_tool_schema,
+						block,
+						'tool block',
+					);
+					if (calls.has(tool.id))
 						throw new InputError(
 							'unsupported',
 							'Repeated OpenCode tool call identity',
 						);
-					calls.add(call_id);
-					if (
-						!['streaming', 'running', 'completed', 'error'].includes(
-							String(state.status),
-						)
-					) {
+					calls.add(tool.id);
+					if (!tool_statuses.includes(String(tool.state.status))) {
 						unknown_state = true;
 						continue;
 					}
-					const input =
-						state.status === 'streaming'
-							? string(state.input, 'tool.input')
-							: JSON.stringify(object(state.input));
+					const state = check(
+						opencode_tool_state_schema,
+						tool.state,
+						'tool state',
+					);
 					const call = add(
 						'tool_call',
 						'assistant',
-						`${name}\n${input}`,
+						`${tool.name}\n${state.status === 'streaming' ? state.input : JSON.stringify(state.input)}`,
 						`${pointer}/state/input`,
-						call_id,
+						tool.id,
 					)!;
-					if (
-						state.status === 'streaming' ||
-						state.status === 'running'
-					)
-						call.state = 'in_progress';
 					result.links!.push({
 						record_key: key,
 						kind: 'tool_call',
 						namespace: 'call',
-						target: call_id,
+						target: tool.id,
 					});
 					if (
-						state.status === 'completed' ||
-						state.status === 'error'
+						state.status === 'streaming' ||
+						state.status === 'running'
 					) {
-						const output =
-							state.content === undefined && state.status === 'error'
-								? []
-								: array(state.content, 'tool.content').map(object);
-						const texts = output
-							.filter((item) => item.type === 'text')
-							.map((item) => string(item.text, 'tool.content.text'));
-						if (
-							output.some(
-								(item) =>
-									!['text', 'file'].includes(String(item.type)),
-							)
-						)
-							unknown_state = true;
-						if (state.status === 'error')
-							texts.push(JSON.stringify(object(state.error)));
-						add(
-							'tool_result',
-							'tool',
-							texts.join('\n'),
-							`${pointer}/state`,
-							call_id,
-							call.native_id,
-						);
-						result.links!.push({
-							record_key: key,
-							kind: 'tool_result_for',
-							namespace: 'call',
-							target: call_id,
-						});
+						call.state = 'in_progress';
+						continue;
 					}
+					const output = state.content ?? [];
+					const texts = output
+						.filter((item) => item.type === 'text')
+						.map((item) => item.text as string);
+					if (
+						output.some(
+							(item) => !['text', 'file'].includes(String(item.type)),
+						)
+					)
+						unknown_state = true;
+					if (state.status === 'error')
+						texts.push(JSON.stringify(state.error));
+					add(
+						'tool_result',
+						'tool',
+						texts.join('\n'),
+						`${pointer}/state`,
+						tool.id,
+						call.native_id,
+					);
+					result.links!.push({
+						record_key: key,
+						kind: 'tool_result_for',
+						namespace: 'call',
+						target: tool.id,
+					});
 				} else {
-					text(block.type);
+					check(opencode_block_schema, block, 'content block');
 					unknown_state = true;
 				}
 			}
-		} else if (['system', 'synthetic', 'skill'].includes(type)) {
+		} else if (context_types.includes(type)) {
 			add(
 				'context',
 				'system',
-				string(data.text, `${type}.text`),
+				check(opencode_text_schema, data, `${type} message`).text,
 				'/data/text',
 			);
 		} else if (type === 'shell') {
+			const shell = check(
+				opencode_shell_schema,
+				data,
+				'shell message',
+			);
 			add(
 				'operation',
 				'tool',
 				[
-					string(data.command, 'shell.command'),
-					data.output === undefined
+					shell.command,
+					shell.output === undefined
 						? ''
-						: typeof data.output === 'string'
-							? data.output
-							: JSON.stringify(data.output),
+						: typeof shell.output === 'string'
+							? shell.output
+							: JSON.stringify(shell.output),
 				]
 					.filter(Boolean)
 					.join('\n'),
 				'/data',
 			);
 		} else if (type === 'compaction') {
-			if (data.status === 'running' || data.status === 'completed')
+			if (data.status === 'running' || data.status === 'completed') {
+				const compaction = check(
+					opencode_compaction_schema,
+					data,
+					'compaction message',
+				);
 				add(
 					'summary',
 					'system',
-					[
-						string(data.summary, 'compaction.summary'),
-						string(data.recent, 'compaction.recent'),
-					]
+					[compaction.summary, compaction.recent]
 						.filter(Boolean)
 						.join('\n'),
 					'/data',
 				);
-			else if (data.status !== 'failed') unknown_state = true;
-		} else if (
-			![
-				'idle',
-				'agent-switched',
-				'model-switched',
-				'location-switched',
-			].includes(type)
-		) {
+			} else if (data.status !== 'failed') unknown_state = true;
+		} else if (!passive_types.includes(type)) {
 			unknown_state = true;
 		}
 	}
