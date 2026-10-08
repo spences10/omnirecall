@@ -118,7 +118,6 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			].includes(String(payload.type))
 		) {
 			unknown_state = true;
-			result.unindexed_records++;
 			continue;
 		}
 		if (entry.type === 'realtime_item') {
@@ -131,7 +130,6 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				].includes(payload.type)
 			) {
 				unknown_state = true;
-				result.unindexed_records++;
 				continue;
 			}
 			validate_source(
@@ -155,13 +153,10 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				'compacted',
 				'world_state',
 			].includes(String(entry.type))
-		) {
-			result.unindexed_records++;
+		)
 			continue;
-		}
 		if (entry.type !== 'event_msg') {
 			unknown_state = true;
-			result.unindexed_records++;
 			continue;
 		}
 		if (payload.type === 'task_started') {
@@ -213,12 +208,8 @@ export function parse_codex(records: RecordLine[]): Transcript {
 						'Extension',
 						'ContextCompaction',
 					].includes(item_type)
-				) {
+				)
 					unknown_state = true;
-					result.unindexed_records++;
-					continue;
-				}
-				result.unindexed_records++;
 				continue;
 			}
 			if (
@@ -248,7 +239,6 @@ export function parse_codex(records: RecordLine[]): Transcript {
 					error.code === 'unsupported'
 				) {
 					unknown_state = true;
-					result.unindexed_records++;
 					continue;
 				}
 				throw error;
@@ -283,18 +273,14 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		) {
 			current_turn = null;
 		} else if (
-			[
+			![
 				'token_count',
 				'user_message',
 				'agent_message',
 				'thread_settings_applied',
 			].includes(String(payload.type))
 		) {
-			result.unindexed_records++;
-		} else {
 			unknown_state = true;
-			result.unindexed_records++;
-			continue;
 		}
 	}
 	result.messages = [...messages.values()];

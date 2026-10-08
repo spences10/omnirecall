@@ -91,22 +91,10 @@ export function parse_pi(records: RecordLine[]): Transcript {
 					result.messages.push(normalized);
 					ancestor = id;
 				}
-			} else result.unindexed_records++;
+			}
 		} else if (entry.type === 'session_info') {
 			result.title = metadata(entry.name);
-		} else if (
-			[
-				'model_change',
-				'thinking_level_change',
-				'compaction',
-				'branch_summary',
-				'custom',
-				'custom_message',
-				'label',
-			].includes(String(entry.type))
-		) {
-			result.unindexed_records++;
-		} else result.unindexed_records++;
+		}
 		nearest_message.set(id, ancestor);
 	}
 	const active_ids = new Set<string>();
