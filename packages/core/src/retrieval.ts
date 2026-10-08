@@ -416,6 +416,40 @@ export function focused_read(
 	};
 }
 
+/** Default read output: the content, how to continue, and where it sits. */
+export function slim_read(
+	archive: Archive,
+	read: ReturnType<typeof focused_read> | ReturnType<typeof raw_read>,
+) {
+	if (!('messages' in read)) {
+		const {
+			archive_id: _archive,
+			record_key: _key,
+			...row
+		} = read.results[0]!;
+		return { results: [row] };
+	}
+	const row = read.results[0]!;
+	return {
+		results: [
+			{
+				ref: row.ref,
+				short_id: archive.short_id(row.archive_id),
+				agent: row.agent,
+				title: row.title,
+				project: row.project,
+				record_ref: row.record_ref,
+				before: row.before,
+				after: row.after,
+				previous_ref: row.previous_ref,
+				next_ref: row.next_ref,
+				branch_boundary: row.branch_boundary,
+			},
+		],
+		messages: read.messages,
+	};
+}
+
 export function raw_read(
 	archive: Archive,
 	ref: string,

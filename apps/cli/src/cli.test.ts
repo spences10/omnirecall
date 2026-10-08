@@ -400,7 +400,13 @@ test('session discovery combines title/date filters with safe short identifiers'
 			'--before',
 			'2026-09-25',
 		];
-		const page = run(['sessions', ...filters, '--limit', '1']);
+		const page = run([
+			'sessions',
+			'--full',
+			...filters,
+			'--limit',
+			'1',
+		]);
 		expect(page).toMatchObject({
 			returned_count: 1,
 			has_more: true,
@@ -408,6 +414,7 @@ test('session discovery combines title/date filters with safe short identifiers'
 		});
 		const next = run([
 			'sessions',
+			'--full',
 			...filters,
 			'--limit',
 			'1',
@@ -628,8 +635,8 @@ test('compact v3 shares provenance, keeps source paths and offers concise sessio
 			expect(detailed).not.toHaveProperty('shared');
 			expect(detailed.results[0]).toHaveProperty('source_status');
 		}
-		const sessions = run(['sessions', '--compact']);
-		const detailed_sessions = run(['sessions']);
+		const sessions = run(['sessions']);
+		const detailed_sessions = run(['sessions', '--full']);
 		expect(sessions.data.schema_version).toBe(3);
 		expect(detailed_sessions.data.schema_version).toBe(1);
 		expect(Buffer.byteLength(sessions.text)).toBeLessThan(
@@ -643,7 +650,8 @@ test('compact v3 shares provenance, keeps source paths and offers concise sessio
 					.results,
 			).toHaveLength(1);
 			const raw = run(['read', row.first_record_ref]).data;
-			expect(raw.schema_version).toBe(2);
+			expect(raw.schema_version).toBe(3);
+			expect(raw.results[0]).not.toHaveProperty('archive_id');
 			expect(raw.results[0].content).toContain('"type":"session"');
 		}
 		const limited = run([
@@ -670,18 +678,34 @@ test('compact v3 shares provenance, keeps source paths and offers concise sessio
 		const missing = rows(mixed).find(
 			(row) => row.path_status === 'missing',
 		)!;
-		const read = run([
-			'read',
-			String(missing.ref),
-			'--context',
-			'0',
-		]).data;
+		const slim = run(['read', String(missing.ref)]).data;
+		expect(slim.schema_version).toBe(3);
+		expect(slim.messages).toHaveLength(1);
+		expect(slim.messages[0].content).toContain('migrations');
+		expect(Object.keys(slim.results[0]).sort()).toEqual([
+			'after',
+			'agent',
+			'before',
+			'branch_boundary',
+			'next_ref',
+			'previous_ref',
+			'project',
+			'record_ref',
+			'ref',
+			'short_id',
+			'title',
+		]);
+		const read = run(['read', String(missing.ref), '--full']).data;
 		expect(read.schema_version).toBe(2);
 		expect(read).not.toHaveProperty('shared');
+		expect(read.messages).toHaveLength(3);
 		expect(read.results[0].source_path).toBe(
 			join(pi_root, 'one.jsonl'),
 		);
-		expect(read.messages[0].content).toContain('migrations');
+		expect(read.results[0].path_status).toBe('missing');
+		expect(Buffer.byteLength(JSON.stringify(slim))).toBeLessThan(
+			Buffer.byteLength(JSON.stringify(read)) / 2,
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -801,7 +825,7 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 			1024,
 		);
 		expect(JSON.parse(bounded.stdout)).toMatchObject({
-			schema_version: 2,
+			schema_version: 3,
 			output_budget_exceeded: true,
 			returned_count: 0,
 			next_offset: 0,
@@ -815,7 +839,8 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 			['read', hit.ref, '--offset', '1'],
 			['search', 'migration', '--full', '--compact'],
 			['recall', 'migration', '--full', '--compact'],
-			['sessions', '--full'],
+			['sessions', '--full', '--compact'],
+			['outline', 'anything', '--full'],
 			['search', 'migration', '--chars', '10'],
 		]) {
 			const invalid = run(args);

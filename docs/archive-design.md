@@ -113,12 +113,18 @@ the archive.
 
 ## Compact output
 
-Default search, default recall, and `sessions --compact` use
-`schema_version: 3`. This replaces the previous compact search/recall
-schema v2; consumers must check the version. Detailed search and
-recall (`--full`) and ordinary sessions remain schema v1. Focused and
-raw `read` responses remain schema v2. Canonical `m1`/`r1` references
+Search, recall, sessions and `read` use `schema_version: 3` by
+default. This replaces the previous compact search/recall schema v2;
+consumers must check the version. `--full` returns detailed schema v1
+rows for search, recall and sessions. Canonical `m1`/`r1` references
 remain valid input to `read`.
+
+Default `read` returns the referenced message alone, with its session
+`short_id`, agent, title, project, `record_ref` and the
+`previous_ref`/`next_ref` of its neighbours. `--context` adds
+neighbouring messages. `read --full` returns the schema v2 form: one
+message of context by default plus source identifiers, source path and
+status, JSON pointer and record links.
 
 Compact output prints short references: `m2.<short_id>.<digest>` for
 messages and `r2.<short_id>.<record key>` for records. The digest is a
@@ -185,11 +191,11 @@ continuation still uses `next_char_offset`.
 Compact sessions keep `short_id`, title/project, timestamp, source
 path and status, parent identity, unindexed-record count and
 `first_record_ref`. They omit internal hashes, parser versions,
-duplicate paths and long canonical identifiers; use ordinary
-`sessions` for full metadata. Titles/projects remain bounded with
-explicit truncation flags; source paths and references are never
-shortened. All retrieval remains archive-only and reports the last
-explicit sync, not a live source check.
+duplicate paths and long canonical identifiers; use `sessions --full`
+for full metadata. Titles/projects remain bounded with explicit
+truncation flags; source paths and references are never shortened. All
+retrieval remains archive-only and reports the last explicit sync, not
+a live source check.
 
 ## Format support
 

@@ -23,6 +23,7 @@ import {
 	parse_ref,
 	raw_read,
 	short_refs,
+	slim_read,
 	turn_evidence,
 } from '../../../packages/core/src/retrieval.ts';
 import { error_code, sync } from '../../../packages/core/src/sync.ts';
@@ -127,12 +128,12 @@ const descriptions: Record<string, string> = {
 	recall:
 		'Search with bounded context; compact by default, --full for detailed rows',
 	sessions:
-		'List session metadata and IDs for scoped searches and raw-record navigation',
+		'List sessions with short_id for scoped searches; compact by default, --full for all metadata',
 	outline:
 		"List one session's user prompts and summaries with refs; then read a ref",
 	evidence:
 		'List tool calls, results and operations in the turn containing a message ref',
-	read: 'Expand an exact ref and verify context; follow next_char_offset for truncated content',
+	read: 'Read one message by ref; --context adds neighbours, --full adds provenance; follow next_char_offset',
 };
 
 const command_options: Record<string, string[]> = {
@@ -201,11 +202,12 @@ const command_options: Record<string, string[]> = {
 		'limit',
 		'offset',
 		'include-history',
+		'full',
 		'compact',
 	],
 	outline: ['query', 'include-history', 'limit', 'offset'],
 	evidence: ['query', 'limit', 'offset'],
-	read: ['query', 'raw', 'chars', 'char-offset', 'context'],
+	read: ['query', 'raw', 'chars', 'char-offset', 'context', 'full'],
 };
 
 function command(name: string) {
@@ -217,7 +219,8 @@ function command(name: string) {
 		},
 		full: {
 			type: 'boolean',
-			description: 'Search/recall: return detailed schema v1 output',
+			description:
+				'Search/recall/sessions: detailed schema v1 rows; read: full provenance (schema v2)',
 		},
 		'by-session': {
 			type: 'boolean',
@@ -322,7 +325,7 @@ function command(name: string) {
 		limit: {
 			type: 'string',
 			description:
-				'Maximum results, 1–100 (compact default 5; detailed 10; outline/evidence 50)',
+				'Maximum results, 1–100 (compact default 5; detailed and sessions 10; outline/evidence 50)',
 		},
 		offset: {
 			type: 'string',
@@ -332,7 +335,7 @@ function command(name: string) {
 		context: {
 			type: 'string',
 			description:
-				'Recall/read messages per side, 0–10 (compact default 1; detailed 2)',
+				'Recall/read messages per side, 0–10 (recall: compact default 1, detailed 2; read: default 0, 1 with --full)',
 		},
 		'max-bytes': {
 			type: 'string',
@@ -357,9 +360,13 @@ function command(name: string) {
 			let progress: ReturnType<typeof sync_progress> | undefined;
 			const compact =
 				['read', 'outline', 'evidence'].includes(name) ||
-				(['search', 'recall'].includes(name) && !args.full) ||
-				(name === 'sessions' && Boolean(args.compact));
-			const schema_version = compact ? (name === 'read' ? 2 : 3) : 1;
+				(['search', 'recall', 'sessions'].includes(name) &&
+					!args.full);
+			const schema_version = compact
+				? name === 'read' && args.full
+					? 2
+					: 3
+				: 1;
 			let max_bytes = compact ? 8192 : 65536;
 			try {
 				max_bytes = integer(
@@ -369,14 +376,17 @@ function command(name: string) {
 					1048576,
 				);
 				if (
-					(args.full && !['search', 'recall'].includes(name)) ||
+					(args.full &&
+						!['search', 'recall', 'sessions', 'read'].includes(
+							name,
+						)) ||
 					(args.compact &&
 						!['search', 'recall', 'sessions'].includes(name)) ||
 					(args.full && args.compact)
 				)
 					throw new InputError(
 						'arguments',
-						'--full applies to search/recall; --compact applies to search/recall/sessions; choose one',
+						'--full applies to search/recall/sessions/read; --compact applies to search/recall/sessions; choose one',
 					);
 				if (args['by-session'] && (name !== 'search' || args.full))
 					throw new InputError(
@@ -470,14 +480,19 @@ function command(name: string) {
 						args.limit,
 						['outline', 'evidence'].includes(name)
 							? 50
-							: compact
+							: compact && name !== 'sessions'
 								? 5
 								: 10,
 						1,
 						100,
 					),
 					offset: integer(args.offset, 0, 0, 1000000),
-					context: integer(args.context, compact ? 1 : 2, 0, 10),
+					context: integer(
+						args.context,
+						name === 'read' ? (args.full ? 1 : 0) : compact ? 1 : 2,
+						0,
+						10,
+					),
 				};
 				if (options.title !== undefined && !options.title.trim())
 					throw new InputError(
@@ -682,10 +697,8 @@ function command(name: string) {
 							'unindexed',
 							'Archive does not exist; sync sources before reading a reference',
 						);
-					result = {
-						status: 'ok',
-						format: 'compact',
-						...(args.raw || query!.startsWith('r')
+					const read =
+						args.raw || query!.startsWith('r')
 							? raw_read(archive, query!, char_offset, chars)
 							: focused_read(
 									archive,
@@ -693,7 +706,11 @@ function command(name: string) {
 									options.context,
 									char_offset,
 									chars,
-								)),
+								);
+					result = {
+						status: 'ok',
+						format: 'compact',
+						...(args.full ? read : slim_read(archive, read)),
 						offset: 0,
 						returned_count: 1,
 						has_more: false,
