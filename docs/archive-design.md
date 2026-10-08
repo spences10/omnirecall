@@ -166,6 +166,14 @@ first non-empty line (up to 160 characters); `text_truncated` marks
 rows with more content to `read`. It returns up to 50 rows by default
 and paginates like other commands.
 
+`evidence <ref>` lists tool calls, tool results and operations in the
+turn containing the referenced message. A turn runs from the user
+prompt at or before the message to the next user prompt, in source
+order on the message's branch. `turn.prompt_ref` and
+`turn.next_prompt_ref` identify its bounds. Rows carry a `ref`, kind,
+timestamp and one whitespace-collapsed line of up to 160 characters;
+`read` a row's `ref` for the full input or output.
+
 Search results include `source_path` alongside snippets. Compact
 recall results carry provenance, match offsets and context references;
 role, kind, timestamp, state and content live only in `messages`,

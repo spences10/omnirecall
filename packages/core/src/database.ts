@@ -550,6 +550,39 @@ export class Archive {
 		};
 	}
 
+	/** Tool calls, results and operations in the turn containing a message. */
+	evidence(
+		archive_id: string,
+		native_id: string,
+		options: PageOptions,
+	) {
+		const target = this.#message(archive_id, native_id);
+		if (!target) return undefined;
+		const position = {
+			archive_id,
+			active: target.active,
+			source_order: target.source_order,
+		};
+		const prompt = this.#statement(sql.turn_start).get(position) as
+			| ArchivedMessage
+			| undefined;
+		const next_prompt = this.#statement(sql.turn_end).get(
+			position,
+		) as ArchivedMessage | undefined;
+		return {
+			prompt,
+			next_prompt,
+			rows: this.#statement(sql.turn_evidence).all({
+				archive_id,
+				active: target.active,
+				start: prompt?.source_order ?? 0,
+				end: next_prompt?.source_order ?? null,
+				limit: options.limit + 1,
+				offset: options.offset,
+			}) as ArchivedMessage[],
+		};
+	}
+
 	search(query: string, options: SearchOptions): SearchMatch[] {
 		return this.#match(query, options, (parameters) =>
 			this.#statement(sql.search).all(parameters),

@@ -101,6 +101,13 @@ get its user prompts and summaries, one line each, with refs to read:
 pnpx omnirecall outline '<short_id>'
 ```
 
+To check what was actually run, ask for the tool evidence behind any
+message. It lists the tool calls, results and operations in that turn:
+
+```bash
+pnpx omnirecall evidence '<ref from search or outline>'
+```
+
 `--title` matches a literal substring (ASCII case-insensitive) on
 `sessions`, `search`, and `recall`. Session date filters use the
 stored session timestamp; search/recall date filters use message

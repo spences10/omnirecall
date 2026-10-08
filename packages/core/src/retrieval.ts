@@ -95,6 +95,8 @@ const ref_fields = new Set([
 	'previous_ref',
 	'next_ref',
 	'first_record_ref',
+	'prompt_ref',
+	'next_prompt_ref',
 	'before',
 	'after',
 ]);
@@ -253,6 +255,49 @@ export function compact_outline(
 					Boolean(row.content_truncated) ||
 					characters.length > outline_chars ||
 					row.content.trim() !== line,
+			};
+		}),
+	};
+}
+
+/** Tool activity in the turn that contains the referenced message. */
+export function turn_evidence(
+	archive: Archive,
+	ref: string,
+	limit: number,
+	offset: number,
+) {
+	const identity = resolve_ref(archive, ref);
+	const evidence = archive.evidence(
+		identity.archive_id,
+		identity.native_id,
+		{ limit, offset },
+	);
+	if (!evidence)
+		throw new InputError(
+			'not_found',
+			'Message reference not found in this archive',
+		);
+	return {
+		turn: {
+			prompt_ref: evidence.prompt
+				? message_ref(evidence.prompt)
+				: null,
+			next_prompt_ref: evidence.next_prompt
+				? message_ref(evidence.next_prompt)
+				: null,
+		},
+		rows: evidence.rows.map((row) => {
+			const line = row.content.replace(/\s+/g, ' ').trim();
+			const characters = Array.from(line);
+			return {
+				ref: message_ref(row),
+				kind: row.kind ?? 'message',
+				timestamp: row.timestamp,
+				text: characters.slice(0, outline_chars).join(''),
+				text_truncated:
+					Boolean(row.content_truncated) ||
+					characters.length > outline_chars,
 			};
 		}),
 	};

@@ -867,6 +867,7 @@ describe('built CLI', () => {
 				'recall',
 				'sessions',
 				'outline',
+				'evidence',
 				'read',
 			],
 			agent_instructions:
@@ -1112,6 +1113,124 @@ test("outline lists one session's user prompts and summaries with readable refs"
 			['outline', listed.short_id, '--kind', 'all'],
 			['outline', listed.short_id, '--after', '2026-01-01'],
 			['outline', listed.short_id, '--full'],
+		]) {
+			const invalid = run(args);
+			expect(invalid.status).toBe(1);
+			expect(invalid.data.code).toBe('arguments');
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('evidence lists the tool activity of the turn containing a message', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omnirecall-evidence-'));
+	const db = join(root, 'archive.db');
+	const pi_root = join(root, 'pi');
+	function run(args: string[]) {
+		const result = run_cli([...args, '--db', db, '--json']);
+		return { status: result.status, data: JSON.parse(result.stdout) };
+	}
+	try {
+		mkdirSync(pi_root);
+		writeFileSync(
+			join(pi_root, 'session.jsonl'),
+			jsonl([
+				...pi_records('turns', '/synthetic/turns'),
+				pi_entry('a2', 'u2', 'assistant', [
+					{ type: 'text', text: 'Running turnneedle checks' },
+					{
+						type: 'toolCall',
+						id: 'call-1',
+						name: 'bash',
+						arguments: { command: 'pnpm   test\n--run' },
+					},
+				]),
+				pi_entry('r2', 'a2', 'toolResult', [
+					{
+						type: 'text',
+						text: 'second-turn-output ' + 'z'.repeat(300),
+					},
+				]),
+				pi_entry('u3', 'r2', 'user', 'Thanks, anything else?'),
+				pi_entry('a3', 'u3', 'assistant', 'Nothing further'),
+			]),
+		);
+		expect(run(['sync', '--pi-root', pi_root]).status).toBe(0);
+		const short_id = run(['sessions', '--compact']).data.results[0]
+			.short_id;
+		const prompts = run(['outline', short_id]).data.results;
+		expect(prompts.map((row: { text: string }) => row.text)).toEqual([
+			'Prepare the database',
+			'Confirm the final checks',
+			'Thanks, anything else?',
+		]);
+		const hit = run(['search', 'turnneedle']).data.results[0];
+		// A prompt and a reply in the same turn share its evidence.
+		for (const ref of [prompts[1].ref, hit.ref]) {
+			const evidence = run(['evidence', ref]);
+			expect(evidence.status).toBe(0);
+			expect(evidence.data).toMatchObject({
+				schema_version: 3,
+				format: 'compact',
+				status: 'ok',
+				turn: {
+					prompt_ref: prompts[1].ref,
+					next_prompt_ref: prompts[2].ref,
+				},
+				returned_count: 2,
+				has_more: false,
+			});
+			expect(
+				evidence.data.results.map(
+					(row: {
+						kind: string;
+						text: string;
+						text_truncated: boolean;
+					}) => [row.kind, row.text, row.text_truncated],
+				),
+			).toEqual([
+				['tool_call', 'bash {"command":"pnpm test\\n--run"}', false],
+				[
+					'tool_result',
+					('second-turn-output ' + 'z'.repeat(300)).slice(0, 160),
+					true,
+				],
+			]);
+		}
+		const first = run(['evidence', prompts[0].ref]).data;
+		expect(first.turn).toEqual({
+			prompt_ref: prompts[0].ref,
+			next_prompt_ref: prompts[1].ref,
+		});
+		expect(
+			first.results.map((row: { text: string }) => row.text),
+		).toEqual(['private-tool-output']);
+		const output = run(['evidence', hit.ref]).data.results[1];
+		expect(
+			run(['read', output.ref, '--context', '0']).data.messages[0]
+				.content,
+		).toContain('second-turn-output');
+		expect(run(['evidence', prompts[2].ref]).data).toMatchObject({
+			status: 'empty',
+			turn: { prompt_ref: prompts[2].ref, next_prompt_ref: null },
+			results: [],
+		});
+		expect(
+			run(['evidence', hit.ref, '--limit', '1']).data,
+		).toMatchObject({
+			returned_count: 1,
+			has_more: true,
+			next_offset: 1,
+		});
+		expect(
+			run(['evidence', `m2.${'0'.repeat(12)}.AAAAAAAAAAA`]).data.code,
+		).toBe('not_found');
+		for (const args of [
+			['evidence'],
+			['evidence', 'not-a-ref'],
+			['evidence', hit.ref, '--kind', 'all'],
+			['evidence', hit.ref, '--context', '1'],
 		]) {
 			const invalid = run(args);
 			expect(invalid.status).toBe(1);

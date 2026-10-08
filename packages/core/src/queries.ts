@@ -233,6 +233,38 @@ export const sql = {
 		GROUP BY m.kind
 		ORDER BY m.kind
 	`,
+	// The user prompts that open and close the turn containing a part.
+	turn_start: `
+		SELECT ${message_columns('1', '400')}
+		FROM parts m
+		WHERE m.archive_id = $archive_id AND m.active = $active
+			AND m.representation = 'primary'
+			AND m.kind = 'message' AND m.role = 'user'
+			AND m.source_order <= $source_order
+		ORDER BY m.source_order DESC, m.native_id
+		LIMIT 1
+	`,
+	turn_end: `
+		SELECT ${message_columns('1', '400')}
+		FROM parts m
+		WHERE m.archive_id = $archive_id AND m.active = $active
+			AND m.representation = 'primary'
+			AND m.kind = 'message' AND m.role = 'user'
+			AND m.source_order > $source_order
+		ORDER BY m.source_order, m.native_id
+		LIMIT 1
+	`,
+	turn_evidence: `
+		SELECT ${message_columns('1', '400')}
+		FROM parts m
+		WHERE m.archive_id = $archive_id AND m.active = $active
+			AND m.representation = 'primary'
+			AND m.kind IN ('tool_call', 'tool_result', 'operation')
+			AND m.source_order >= $start
+			AND ($end IS NULL OR m.source_order < $end)
+		ORDER BY m.source_order, m.native_id
+		LIMIT $limit OFFSET $offset
+	`,
 	read_message: `
 		SELECT ${message_columns('$char_offset + 1', '$chars')},
 			length(m.content) AS content_length,

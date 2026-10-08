@@ -23,6 +23,7 @@ import {
 	parse_ref,
 	raw_read,
 	short_refs,
+	turn_evidence,
 } from '../../../packages/core/src/retrieval.ts';
 import { error_code, sync } from '../../../packages/core/src/sync.ts';
 import {
@@ -44,6 +45,7 @@ const capabilities = [
 	'recall',
 	'sessions',
 	'outline',
+	'evidence',
 	'read',
 ];
 const info = defineCommand({
@@ -128,6 +130,8 @@ const descriptions: Record<string, string> = {
 		'List session metadata and IDs for scoped searches and raw-record navigation',
 	outline:
 		"List one session's user prompts and summaries with refs; then read a ref",
+	evidence:
+		'List tool calls, results and operations in the turn containing a message ref',
 	read: 'Expand an exact ref and verify context; follow next_char_offset for truncated content',
 };
 
@@ -200,6 +204,7 @@ const command_options: Record<string, string[]> = {
 		'compact',
 	],
 	outline: ['query', 'include-history', 'limit', 'offset'],
+	evidence: ['query', 'limit', 'offset'],
 	read: ['query', 'raw', 'chars', 'char-offset', 'context'],
 };
 
@@ -238,8 +243,8 @@ function command(name: string) {
 			type: 'positional',
 			required: false,
 			description:
-				name === 'read'
-					? 'Exact ref copied from search or sessions'
+				name === 'read' || name === 'evidence'
+					? 'Exact ref copied from search, recall or outline'
 					: name === 'outline'
 						? 'Session short_id, session ID, archive ID or unique prefix'
 						: 'FTS5 query: words use AND; "source path", sqlite OR database, migrat*, (a OR b) NOT c. Package/path punctuation (- . / @) is quoted automatically.',
@@ -317,7 +322,7 @@ function command(name: string) {
 		limit: {
 			type: 'string',
 			description:
-				'Maximum results, 1–100 (compact default 5; detailed 10; outline 50)',
+				'Maximum results, 1–100 (compact default 5; detailed 10; outline/evidence 50)',
 		},
 		offset: {
 			type: 'string',
@@ -351,7 +356,7 @@ function command(name: string) {
 			let archive: Archive | undefined;
 			let progress: ReturnType<typeof sync_progress> | undefined;
 			const compact =
-				['read', 'outline'].includes(name) ||
+				['read', 'outline', 'evidence'].includes(name) ||
 				(['search', 'recall'].includes(name) && !args.full) ||
 				(name === 'sessions' && Boolean(args.compact));
 			const schema_version = compact ? (name === 'read' ? 2 : 3) : 1;
@@ -463,7 +468,11 @@ function command(name: string) {
 					include_history: Boolean(args['include-history']),
 					limit: integer(
 						args.limit,
-						name === 'outline' ? 50 : compact ? 5 : 10,
+						['outline', 'evidence'].includes(name)
+							? 50
+							: compact
+								? 5
+								: 10,
 						1,
 						100,
 					),
@@ -544,7 +553,10 @@ function command(name: string) {
 						'sync operates on whole source roots, not project/session/history filters',
 					);
 				const query = optional(args.query)?.trim();
-				if (name === 'read' && !is_short_ref(query ?? ''))
+				if (
+					(name === 'read' || name === 'evidence') &&
+					!is_short_ref(query ?? '')
+				)
 					parse_ref(query ?? '');
 				if (name === 'outline' && !query)
 					throw new InputError(
@@ -634,6 +646,33 @@ function command(name: string) {
 						has_more,
 						next_offset: has_more
 							? options.offset + outline.rows.length
+							: null,
+						truncated: has_more,
+					};
+				} else if (name === 'evidence') {
+					if (!archive)
+						throw new InputError(
+							'unindexed',
+							'Archive does not exist; sync sources before reading a reference',
+						);
+					const { turn, rows } = turn_evidence(
+						archive,
+						query!,
+						options.limit,
+						options.offset,
+					);
+					const has_more = rows.length > options.limit;
+					const results = rows.slice(0, options.limit);
+					result = {
+						status: results.length ? 'ok' : 'empty',
+						format: 'compact',
+						turn,
+						results,
+						offset: options.offset,
+						returned_count: results.length,
+						has_more,
+						next_offset: has_more
+							? options.offset + results.length
 							: null,
 						truncated: has_more,
 					};
@@ -804,6 +843,7 @@ export const main = defineCommand({
 		recall: command('recall'),
 		sessions: command('sessions'),
 		outline: command('outline'),
+		evidence: command('evidence'),
 		read: command('read'),
 	},
 });
