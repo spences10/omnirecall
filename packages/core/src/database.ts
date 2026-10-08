@@ -517,6 +517,39 @@ export class Archive {
 		});
 	}
 
+	/** One session's user prompts and summaries, in source order. */
+	outline(
+		session: string,
+		options: PageOptions & { include_history?: boolean },
+	) {
+		const [found] = this.sessions({ session, limit: 1, offset: 0 });
+		if (!found)
+			throw new InputError(
+				'not_found',
+				'Session not found in this archive; copy short_id from sessions or search --by-session',
+			);
+		const scope = {
+			archive_id: found.archive_id,
+			include_history: Number(Boolean(options.include_history)),
+		};
+		return {
+			session: found,
+			parts: Object.fromEntries(
+				(
+					this.#statement(sql.part_counts).all(scope) as {
+						kind: string;
+						count: number;
+					}[]
+				).map((row) => [row.kind, row.count]),
+			),
+			rows: this.#statement(sql.outline).all({
+				...scope,
+				limit: options.limit + 1,
+				offset: options.offset,
+			}) as ArchivedMessage[],
+		};
+	}
+
 	search(query: string, options: SearchOptions): SearchMatch[] {
 		return this.#match(query, options, (parameters) =>
 			this.#statement(sql.search).all(parameters),

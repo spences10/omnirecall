@@ -159,6 +159,13 @@ and the best hit's `ref` and snippet. It omits source paths, statuses
 and message state to stay small; follow up with
 `search --session <short_id>` or read the `ref`.
 
+`outline <session>` returns one session's shape: a `session` header
+with per-kind part counts, then its user prompts and stored summaries
+in source order. Each row carries a `ref`, kind, timestamp and the
+first non-empty line (up to 160 characters); `text_truncated` marks
+rows with more content to `read`. It returns up to 50 rows by default
+and paginates like other commands.
+
 Search results include `source_path` alongside snippets. Compact
 recall results carry provenance, match offsets and context references;
 role, kind, timestamp, state and content live only in `messages`,

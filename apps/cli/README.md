@@ -72,6 +72,13 @@ pnpx omnirecall search "sqlite" --by-session
 pnpx omnirecall search "sqlite" --session '<short_id>'
 ```
 
+To see what a long session covered before reading it, outline it. You
+get its user prompts and summaries, one line each, with refs to read:
+
+```bash
+pnpx omnirecall outline '<short_id>'
+```
+
 `--title` matches a literal substring (ASCII case-insensitive) on
 `sessions`, `search`, and `recall`. Session date filters use the
 stored session timestamp; search/recall date filters use message

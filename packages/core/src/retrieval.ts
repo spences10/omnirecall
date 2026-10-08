@@ -227,6 +227,37 @@ export function compact_session_matches(matches: SessionMatch[]) {
 	}));
 }
 
+const outline_chars = 160;
+
+export function compact_outline(
+	outline: ReturnType<Archive['outline']>,
+) {
+	return {
+		session: {
+			...compact_sessions([outline.session])[0]!,
+			parts: outline.parts,
+		},
+		results: outline.rows.map((row) => {
+			const line =
+				row.content
+					.split('\n')
+					.find((text) => text.trim())
+					?.trim() ?? '';
+			const characters = Array.from(line);
+			return {
+				ref: message_ref(row),
+				kind: row.kind ?? 'message',
+				timestamp: row.timestamp,
+				text: characters.slice(0, outline_chars).join(''),
+				text_truncated:
+					Boolean(row.content_truncated) ||
+					characters.length > outline_chars ||
+					row.content.trim() !== line,
+			};
+		}),
+	};
+}
+
 export function compact_recall(
 	matches: (SearchMatch & MessageContext)[],
 ) {

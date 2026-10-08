@@ -215,6 +215,24 @@ export const sql = {
 	`,
 	// Filter on parts: FTS5 ignores a rowid constraint combined with MATCH.
 	search_hit: search_rows('AND m.rowid = $part'),
+	// A session's shape: what the user asked, plus any stored summaries.
+	outline: `
+		SELECT ${message_columns('1', '400')}
+		FROM parts m
+		WHERE m.archive_id = $archive_id
+			AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+			AND ((m.kind = 'message' AND m.role = 'user') OR m.kind = 'summary')
+		ORDER BY m.source_order, m.native_id
+		LIMIT $limit OFFSET $offset
+	`,
+	part_counts: `
+		SELECT m.kind, count(*) AS count
+		FROM parts m
+		WHERE m.archive_id = $archive_id
+			AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+		GROUP BY m.kind
+		ORDER BY m.kind
+	`,
 	read_message: `
 		SELECT ${message_columns('$char_offset + 1', '$chars')},
 			length(m.content) AS content_length,

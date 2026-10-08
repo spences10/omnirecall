@@ -866,6 +866,7 @@ describe('built CLI', () => {
 				'search',
 				'recall',
 				'sessions',
+				'outline',
 				'read',
 			],
 			agent_instructions:
@@ -992,6 +993,125 @@ test('search --by-session lists each matching session once with hit counts and a
 			['search', 'groupneedle', '--by-session', '--full'],
 			['recall', 'groupneedle', '--by-session'],
 			['sessions', '--by-session'],
+		]) {
+			const invalid = run(args);
+			expect(invalid.status).toBe(1);
+			expect(invalid.data.code).toBe('arguments');
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("outline lists one session's user prompts and summaries with readable refs", () => {
+	const root = mkdtempSync(join(tmpdir(), 'omnirecall-outline-'));
+	const db = join(root, 'archive.db');
+	const pi_root = join(root, 'pi');
+	function run(args: string[]) {
+		const result = run_cli([...args, '--db', db, '--json']);
+		return { status: result.status, data: JSON.parse(result.stdout) };
+	}
+	try {
+		expect(run(['outline', 'anything']).data.code).toBe('unindexed');
+		mkdirSync(pi_root);
+		writeFileSync(
+			join(pi_root, 'session.jsonl'),
+			jsonl([
+				...pi_records('outlined', '/synthetic/outline'),
+				pi_entry('a2', 'u2', 'assistant', 'All checks passed'),
+				pi_entry(
+					'u3',
+					'a2',
+					'user',
+					'\n  Ship it now  \nwith the changelog\n' + 'x'.repeat(500),
+				),
+				{
+					type: 'compaction',
+					id: 'c1',
+					parentId: 'u3',
+					timestamp: '2026-09-01T10:00:00.000Z',
+					summary: 'Database prepared and shipped',
+					firstKeptEntryId: 'u3',
+				},
+				pi_entry('u4', 'c1', 'user', 'y'.repeat(300)),
+			]),
+		);
+		writeFileSync(
+			join(pi_root, 'other.jsonl'),
+			jsonl(pi_records('elsewhere', '/synthetic/other')),
+		);
+		expect(run(['sync', '--pi-root', pi_root]).status).toBe(0);
+		const listed = run([
+			'sessions',
+			'--project',
+			'/synthetic/outline',
+			'--compact',
+		]).data.results[0];
+		const outline = run(['outline', listed.short_id]);
+		expect(outline.status).toBe(0);
+		expect(outline.data).toMatchObject({
+			schema_version: 3,
+			format: 'compact',
+			status: 'ok',
+			returned_count: 5,
+			has_more: false,
+			session: {
+				short_id: listed.short_id,
+				title: 'Pi migration plan',
+				project: '/synthetic/outline',
+				parts: { message: 6, summary: 1 },
+			},
+		});
+		expect(
+			outline.data.results.map(
+				(row: {
+					kind: string;
+					text: string;
+					text_truncated: boolean;
+				}) => [row.kind, row.text, row.text_truncated],
+			),
+		).toEqual([
+			['message', 'Prepare the database', false],
+			['message', 'Confirm the final checks', false],
+			['message', 'Ship it now', true],
+			['summary', 'Database prepared and shipped', false],
+			['message', 'y'.repeat(160), true],
+		]);
+		const shipped = outline.data.results[2];
+		expect(shipped.ref).toMatch(/^m2\./);
+		expect(
+			run(['read', shipped.ref, '--context', '0']).data.messages[0]
+				.content,
+		).toContain('with the changelog');
+		const page = run([
+			'outline',
+			listed.short_id,
+			'--limit',
+			'2',
+		]).data;
+		expect(page).toMatchObject({
+			returned_count: 2,
+			has_more: true,
+			next_offset: 2,
+		});
+		expect(
+			run([
+				'outline',
+				listed.short_id,
+				'--limit',
+				'2',
+				'--offset',
+				'2',
+			]).data.results[0].text,
+		).toBe('Ship it now');
+		expect(run(['outline', 'missing-session']).data.code).toBe(
+			'not_found',
+		);
+		for (const args of [
+			['outline'],
+			['outline', listed.short_id, '--kind', 'all'],
+			['outline', listed.short_id, '--after', '2026-01-01'],
+			['outline', listed.short_id, '--full'],
 		]) {
 			const invalid = run(args);
 			expect(invalid.status).toBe(1);
@@ -1437,6 +1557,9 @@ test('command help exposes only relevant options without a separate guide', () =
 	const read = run_cli(['read', '--help']);
 	expect(read.stdout).toContain('--char-offset');
 	expect(read.stdout).not.toContain('--agent');
+	const outline = run_cli(['outline', '--help']);
+	expect(outline.stdout).toContain('--limit');
+	expect(outline.stdout).not.toContain('--kind');
 	expect(run_cli(['--help']).stdout).not.toContain('guide');
 });
 

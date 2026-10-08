@@ -12,6 +12,7 @@ import {
 import { source_config } from '../../../packages/core/src/files.ts';
 import { bounded_json } from '../../../packages/core/src/output.ts';
 import {
+	compact_outline,
 	compact_recall,
 	compact_search,
 	compact_session_matches,
@@ -42,6 +43,7 @@ const capabilities = [
 	'search',
 	'recall',
 	'sessions',
+	'outline',
 	'read',
 ];
 const info = defineCommand({
@@ -124,6 +126,8 @@ const descriptions: Record<string, string> = {
 		'Search with bounded context; compact by default, --full for detailed rows',
 	sessions:
 		'List session metadata and IDs for scoped searches and raw-record navigation',
+	outline:
+		"List one session's user prompts and summaries with refs; then read a ref",
 	read: 'Expand an exact ref and verify context; follow next_char_offset for truncated content',
 };
 
@@ -195,6 +199,7 @@ const command_options: Record<string, string[]> = {
 		'include-history',
 		'compact',
 	],
+	outline: ['query', 'include-history', 'limit', 'offset'],
 	read: ['query', 'raw', 'chars', 'char-offset', 'context'],
 };
 
@@ -235,7 +240,9 @@ function command(name: string) {
 			description:
 				name === 'read'
 					? 'Exact ref copied from search or sessions'
-					: 'FTS5 query: words use AND; "source path", sqlite OR database, migrat*, (a OR b) NOT c. Package/path punctuation (- . / @) is quoted automatically.',
+					: name === 'outline'
+						? 'Session short_id, session ID, archive ID or unique prefix'
+						: 'FTS5 query: words use AND; "source path", sqlite OR database, migrat*, (a OR b) NOT c. Package/path punctuation (- . / @) is quoted automatically.',
 		},
 		db: {
 			type: 'string',
@@ -310,7 +317,7 @@ function command(name: string) {
 		limit: {
 			type: 'string',
 			description:
-				'Maximum results, 1–100 (compact default 5; detailed 10)',
+				'Maximum results, 1–100 (compact default 5; detailed 10; outline 50)',
 		},
 		offset: {
 			type: 'string',
@@ -344,7 +351,7 @@ function command(name: string) {
 			let archive: Archive | undefined;
 			let progress: ReturnType<typeof sync_progress> | undefined;
 			const compact =
-				name === 'read' ||
+				['read', 'outline'].includes(name) ||
 				(['search', 'recall'].includes(name) && !args.full) ||
 				(name === 'sessions' && Boolean(args.compact));
 			const schema_version = compact ? (name === 'read' ? 2 : 3) : 1;
@@ -454,7 +461,12 @@ function command(name: string) {
 					after: date_filter(args.after),
 					before: date_filter(args.before, true),
 					include_history: Boolean(args['include-history']),
-					limit: integer(args.limit, compact ? 5 : 10, 1, 100),
+					limit: integer(
+						args.limit,
+						name === 'outline' ? 50 : compact ? 5 : 10,
+						1,
+						100,
+					),
 					offset: integer(args.offset, 0, 0, 1000000),
 					context: integer(args.context, compact ? 1 : 2, 0, 10),
 				};
@@ -534,6 +546,11 @@ function command(name: string) {
 				const query = optional(args.query)?.trim();
 				if (name === 'read' && !is_short_ref(query ?? ''))
 					parse_ref(query ?? '');
+				if (name === 'outline' && !query)
+					throw new InputError(
+						'arguments',
+						'Provide a session identifier; copy short_id from sessions or search --by-session',
+					);
 				if (
 					(name === 'search' || name === 'recall') &&
 					(!query || query.length > 1000)
@@ -596,6 +613,30 @@ function command(name: string) {
 						);
 					if (result.status === 'partial') process.exitCode = 2;
 					else if (result.status === 'error') process.exitCode = 1;
+				} else if (name === 'outline') {
+					if (!archive)
+						throw new InputError(
+							'unindexed',
+							'Archive does not exist; sync sources before outlining a session',
+						);
+					const outline = archive.outline(query!, options);
+					const has_more = outline.rows.length > options.limit;
+					outline.rows.length = Math.min(
+						outline.rows.length,
+						options.limit,
+					);
+					result = {
+						status: 'ok',
+						format: 'compact',
+						...compact_outline(outline),
+						offset: options.offset,
+						returned_count: outline.rows.length,
+						has_more,
+						next_offset: has_more
+							? options.offset + outline.rows.length
+							: null,
+						truncated: has_more,
+					};
 				} else if (name === 'read') {
 					if (!archive)
 						throw new InputError(
@@ -762,6 +803,7 @@ export const main = defineCommand({
 		search: command('search'),
 		recall: command('recall'),
 		sessions: command('sessions'),
+		outline: command('outline'),
 		read: command('read'),
 	},
 });
