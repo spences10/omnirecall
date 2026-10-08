@@ -1,5 +1,26 @@
 # omnirecall
 
+## 0.0.6
+
+### Patch Changes
+
+- 689ce22: Make recall compact by default; use `--full` for detailed
+  schema v1 rows.
+- 6478671: Make sessions compact by default; use `--full` for detailed
+  schema v1 rows.
+- c66300b: Point `info` agent instructions at session-first retrieval:
+  by-session search, outline, recall, evidence, read.
+- 5a73da4: Add `search --by-session`: one row per matching session
+  with hit count and best snippet.
+- b621875: Add `outline`: list a session's user prompts and summaries
+  with refs to read.
+- 4e6ca5e: Print short `m2`/`r2` refs in compact output; `read`
+  accepts short and canonical refs.
+- 6478671: Slim `read` to one message plus navigation refs; `--full`
+  restores context and provenance.
+- 1ba566f: Add `evidence`: list tool calls, results and operations in
+  a message's turn.
+
 ## 0.0.5
 
 ### Patch Changes
