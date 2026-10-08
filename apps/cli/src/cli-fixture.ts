@@ -3,7 +3,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, expect, onTestFinished } from 'vitest';
+import { afterAll, expect } from 'vitest';
+
+export {
+	suite_dir,
+	temp_dir,
+} from '../../../packages/core/src/test-support.ts';
 
 const entry_path = fileURLToPath(
 	new URL('../dist/index.js', import.meta.url),
@@ -65,11 +70,7 @@ export function archive_cli(
 	return Object.assign(run, { outcome });
 }
 
-/** A temporary directory, removed when the current test finishes. */
-export function temp_dir(prefix: string) {
-	const path = mkdtempSync(join(tmpdir(), prefix));
-	onTestFinished(() =>
-		rmSync(path, { recursive: true, force: true }),
-	);
-	return path;
-}
+/** What `archive_cli(db).outcome` returns. */
+export type Outcome = ReturnType<
+	ReturnType<typeof archive_cli>['outcome']
+>;
