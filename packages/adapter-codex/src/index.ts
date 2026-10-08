@@ -1,6 +1,9 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { preserve_records } from '../../adapter-shared/src/evidence.ts';
+import {
+	obj,
+	preserve_records,
+} from '../../adapter-shared/src/evidence.ts';
 import {
 	codex_dialogue,
 	codex_entry_schema,
@@ -21,11 +24,72 @@ import {
 	metadata,
 	object,
 	text,
+	type JsonObject,
 	type Message,
 	type RecordLine,
 	type Transcript,
 } from '../../core/src/types.ts';
 import { codex_evidence } from './evidence.ts';
+
+// Known native types. Anything else leaves the session's activity unknown.
+const response_items = [
+	'message',
+	'reasoning',
+	'function_call',
+	'function_call_output',
+	'custom_tool_call',
+	'custom_tool_call_output',
+	'web_search_call',
+	'local_shell_call',
+];
+const realtime_items = [
+	'realtime_session_started',
+	'transcript_segment',
+	'realtime_session_closed',
+];
+/** Entry types that carry no dialogue and never change turn state. */
+const passive_entries = [
+	'response_item',
+	'token_usage_record',
+	'compacted',
+	'world_state',
+];
+/** Completed items kept as evidence rather than dialogue. */
+const evidence_items = [
+	'Reasoning',
+	'CommandExecution',
+	'FileChange',
+	'McpToolCall',
+	'DynamicToolCall',
+	'WebSearch',
+	'ImageView',
+	'ImageGeneration',
+	'Plan',
+	'CollabAgentToolCall',
+	'CollabToolCall',
+	'Extension',
+	'ContextCompaction',
+];
+const turn_endings = ['task_complete', 'turn_aborted'];
+const passive_events = [
+	'token_count',
+	'user_message',
+	'agent_message',
+	'thread_settings_applied',
+];
+
+// Approval reviewers receive machine-supplied conversation copies as user
+// messages. Classify by explicit provenance, never by body text or filename.
+function is_approval_reviewer(meta: JsonObject) {
+	const source = obj(meta.source);
+	const reviewer_name = obj(source.subagent).other;
+	return (
+		reviewer_name === 'guardian' ||
+		reviewer_name === 'approval_reviewer' ||
+		source.internal === 'guardian' ||
+		meta.thread_source === 'guardian_review'
+	);
+}
 
 export function parse_codex(records: RecordLine[]): Transcript {
 	const header = records[0]?.value;
@@ -46,25 +110,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		'Codex',
 		records[0]!.byte_offset,
 	);
-	// Approval reviewers receive machine-supplied conversation copies as user
-	// messages. Classify by explicit provenance, never by body text or filename.
-	const source =
-		meta.source &&
-		typeof meta.source === 'object' &&
-		!Array.isArray(meta.source)
-			? object(meta.source)
-			: {};
-	const reviewer_name =
-		source.subagent &&
-		typeof source.subagent === 'object' &&
-		!Array.isArray(source.subagent)
-			? object(source.subagent).other
-			: undefined;
-	const approval_reviewer =
-		reviewer_name === 'guardian' ||
-		reviewer_name === 'approval_reviewer' ||
-		source.internal === 'guardian' ||
-		meta.thread_source === 'guardian_review';
+	const approval_reviewer = is_approval_reviewer(meta);
 	const result: Transcript = {
 		native_id: text(meta.id),
 		project: text(meta.cwd),
@@ -108,16 +154,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		const payload = object(entry.payload);
 		if (
 			entry.type === 'response_item' &&
-			![
-				'message',
-				'reasoning',
-				'function_call',
-				'function_call_output',
-				'custom_tool_call',
-				'custom_tool_call_output',
-				'web_search_call',
-				'local_shell_call',
-			].includes(String(payload.type))
+			!response_items.includes(String(payload.type))
 		) {
 			unknown_state = true;
 			continue;
@@ -125,11 +162,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		if (entry.type === 'realtime_item') {
 			if (
 				typeof payload.type === 'string' &&
-				![
-					'realtime_session_started',
-					'transcript_segment',
-					'realtime_session_closed',
-				].includes(payload.type)
+				!realtime_items.includes(payload.type)
 			) {
 				unknown_state = true;
 				continue;
@@ -148,15 +181,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			ensure_turn(current_turn);
 			continue;
 		}
-		if (
-			[
-				'response_item',
-				'token_usage_record',
-				'compacted',
-				'world_state',
-			].includes(String(entry.type))
-		)
-			continue;
+		if (passive_entries.includes(String(entry.type))) continue;
 		if (entry.type !== 'event_msg') {
 			unknown_state = true;
 			continue;
@@ -194,24 +219,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				item_type !== 'UserMessage' &&
 				item_type !== 'AgentMessage'
 			) {
-				if (
-					![
-						'Reasoning',
-						'CommandExecution',
-						'FileChange',
-						'McpToolCall',
-						'DynamicToolCall',
-						'WebSearch',
-						'ImageView',
-						'ImageGeneration',
-						'Plan',
-						'CollabAgentToolCall',
-						'CollabToolCall',
-						'Extension',
-						'ContextCompaction',
-					].includes(item_type)
-				)
-					unknown_state = true;
+				if (!evidence_items.includes(item_type)) unknown_state = true;
 				continue;
 			}
 			if (
@@ -270,18 +278,9 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				});
 				previous_id = id;
 			}
-		} else if (
-			['task_complete', 'turn_aborted'].includes(String(payload.type))
-		) {
+		} else if (turn_endings.includes(String(payload.type))) {
 			current_turn = null;
-		} else if (
-			![
-				'token_count',
-				'user_message',
-				'agent_message',
-				'thread_settings_applied',
-			].includes(String(payload.type))
-		) {
+		} else if (!passive_events.includes(String(payload.type))) {
 			unknown_state = true;
 		}
 	}
