@@ -113,13 +113,12 @@ the archive.
 
 ## Compact output
 
-Default search, `recall --compact`, and `sessions --compact` use
+Default search, default recall, and `sessions --compact` use
 `schema_version: 3`. This replaces the previous compact search/recall
-schema v2; consumers must check the version. Detailed search
-(`--full`), ordinary recall and ordinary sessions remain schema v1.
-Focused and raw `read` responses remain schema v2. References keep
-their existing exact `m1`/`r1` format and can be passed directly to
-`read`.
+schema v2; consumers must check the version. Detailed search and
+recall (`--full`) and ordinary sessions remain schema v1. Focused and
+raw `read` responses remain schema v2. References keep their existing
+exact `m1`/`r1` format and can be passed directly to `read`.
 
 Metadata identical across at least two returned rows is stored once in
 optional `shared.results` or `shared.messages` objects. A missing

@@ -118,7 +118,7 @@ const descriptions: Record<string, string> = {
 	search:
 		'Search conversation messages; use --kind for tool evidence, then read a result ref',
 	recall:
-		'Search with bounded context; use --compact --json for LLM retrieval',
+		'Search with bounded context; compact by default, --full for detailed rows',
 	sessions:
 		'List session metadata and IDs for scoped searches and raw-record navigation',
 	read: 'Expand an exact ref and verify context; follow next_char_offset for truncated content',
@@ -174,6 +174,7 @@ const command_options: Record<string, string[]> = {
 		'include-history',
 		'limit',
 		'offset',
+		'full',
 		'compact',
 		'context',
 	],
@@ -202,7 +203,7 @@ function command(name: string) {
 		},
 		full: {
 			type: 'boolean',
-			description: 'Search: return detailed schema v1 output',
+			description: 'Search/recall: return detailed schema v1 output',
 		},
 		compact: {
 			type: 'boolean',
@@ -335,9 +336,8 @@ function command(name: string) {
 			let progress: ReturnType<typeof sync_progress> | undefined;
 			const compact =
 				name === 'read' ||
-				(name === 'search' && !args.full) ||
-				(['recall', 'sessions'].includes(name) &&
-					Boolean(args.compact));
+				(['search', 'recall'].includes(name) && !args.full) ||
+				(name === 'sessions' && Boolean(args.compact));
 			const schema_version = compact ? (name === 'read' ? 2 : 3) : 1;
 			let max_bytes = compact ? 8192 : 65536;
 			try {
@@ -348,14 +348,14 @@ function command(name: string) {
 					1048576,
 				);
 				if (
-					(args.full && name !== 'search') ||
+					(args.full && !['search', 'recall'].includes(name)) ||
 					(args.compact &&
 						!['search', 'recall', 'sessions'].includes(name)) ||
 					(args.full && args.compact)
 				)
 					throw new InputError(
 						'arguments',
-						'--full applies to search; --compact applies to search/recall/sessions; choose one',
+						'--full applies to search/recall; --compact applies to search/recall/sessions; choose one',
 					);
 				if (
 					name !== 'read' &&

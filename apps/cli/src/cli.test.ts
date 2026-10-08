@@ -106,9 +106,13 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 				.map((row: { agent: string }) => row.agent)
 				.sort(),
 		).toEqual(['codex', 'pi']);
+		expect(result.schema_version).toBe(3);
+		const content = (ref: string) =>
+			result.messages.find((m: { ref: string }) => m.ref === ref)
+				.content;
 		for (const row of result.results) {
-			expect(row.before[0].content).toBe('Prepare the database');
-			expect(row.after[0].content).toBe('Confirm the final checks');
+			expect(content(row.before[0])).toBe('Prepare the database');
+			expect(content(row.after[0])).toBe('Confirm the final checks');
 		}
 		const original_db = readFileSync(db);
 		const filtered = run_cli([
@@ -302,10 +306,16 @@ test('search and recall include whole UTC days but preserve exact timestamp boun
 					{ TZ: 'Pacific/Honolulu' },
 				);
 				expect(response.status, response.stdout).toBe(0);
+				const data = JSON.parse(response.stdout);
 				expect(
-					JSON.parse(response.stdout)
-						.results.map(
-							(row: { timestamp: string }) => row.timestamp,
+					data.results
+						.map(
+							(row: { ref: string; timestamp?: string }) =>
+								row.timestamp ??
+								data.messages.find(
+									(m: { ref: string }) => m.ref === row.ref,
+								).timestamp ??
+								data.shared.messages.timestamp,
 						)
 						.sort(),
 				).toEqual(expected);
@@ -419,7 +429,7 @@ test('session discovery combines title/date filters with safe short identifiers'
 			['search'],
 			['search', '--full'],
 			['recall'],
-			['recall', '--compact'],
+			['recall', '--full'],
 		]) {
 			expect(
 				run([...mode, 'migrations', '--title', '%_TARGET']).results,
@@ -611,7 +621,7 @@ test('compact v3 shares provenance, keeps source paths and offers concise sessio
 		}
 		for (const args of [
 			['search', 'migrations', '--full'],
-			['recall', 'migrations'],
+			['recall', 'migrations', '--full'],
 		]) {
 			const detailed = run(args).data;
 			expect(detailed.schema_version).toBe(1);
@@ -777,6 +787,8 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 			['read', hit.ref, '--agent', 'pi'],
 			['read', hit.ref, '--offset', '1'],
 			['search', 'migration', '--full', '--compact'],
+			['recall', 'migration', '--full', '--compact'],
+			['sessions', '--full'],
 			['search', 'migration', '--chars', '10'],
 		]) {
 			const invalid = run(args);
@@ -1057,6 +1069,7 @@ test('OpenCode v2 is discovered through XDG and supports CLI retrieval from live
 			'opencodeneedle',
 			'--agent',
 			'opencode',
+			'--full',
 		]).results[0];
 		expect(recalled.before[0].content).toBe('Prepare the database');
 		expect(recalled.after[0].content).toBe(
@@ -1318,7 +1331,7 @@ test('default search and recall exclude Codex reviewer context while explicit re
 			['search'],
 			['search', '--full'],
 			['recall'],
-			['recall', '--compact'],
+			['recall', '--full'],
 		]) {
 			const response = run([...mode, 'migrations']);
 			expect(response.results).toHaveLength(1);
@@ -1380,7 +1393,7 @@ test('FTS5 syntax works through search and recall with actionable malformed-quer
 			['search'],
 			['search', '--full'],
 			['recall'],
-			['recall', '--compact'],
+			['recall', '--full'],
 		]) {
 			const result = run_cli([
 				...mode,

@@ -77,16 +77,15 @@ identifier ambiguity. Printed `short_id` values are unique across the
 current archive; re-list sessions if a later import makes an older
 prefix ambiguous.
 
-For smaller responses, use `recall --compact` or `sessions --compact`;
-search is compact by default. These use JSON schema v3: identical
-metadata lives in optional `shared.results` / `shared.messages`
-objects, with per-row values taking precedence. Source paths are
-included, and recall avoids repeating content in snippets unless the
-message excerpt omits the hit. Full `ref` values remain directly
-usable by `read`.
+Search and recall are compact by default; use `sessions --compact` for
+smaller session listings. These use JSON schema v3: identical metadata
+lives in optional `shared.results` / `shared.messages` objects, with
+per-row values taking precedence. Source paths are included, and
+recall avoids repeating content in snippets unless the message excerpt
+omits the hit. Full `ref` values remain directly usable by `read`.
 
-Detailed search (`--full`), ordinary recall and ordinary sessions stay
-on schema v1; `read` stays on schema v2. See
+Detailed search and recall (`--full`) and ordinary sessions stay on
+schema v1; `read` stays on schema v2. See
 [the output contract](https://github.com/spences10/omnirecall/blob/main/docs/archive-design.md#compact-output)
 for decoding shared metadata.
 
