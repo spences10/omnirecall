@@ -5,7 +5,6 @@ import {
 	preserve_records,
 } from '../../adapter-shared/src/evidence.ts';
 import {
-	codex_dialogue,
 	codex_entry_schema,
 	codex_header_schema,
 	codex_realtime_schema,
@@ -25,11 +24,11 @@ import {
 	object,
 	text,
 	type JsonObject,
-	type Message,
 	type RecordLine,
 	type Transcript,
 } from '../../core/src/types.ts';
 import { codex_evidence } from './evidence.ts';
+import { codex_thread } from './thread.ts';
 
 // Known native types. Anything else leaves the session's activity unknown.
 const response_items = [
@@ -123,20 +122,8 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		unindexed_records: 0,
 	};
 	let unknown_state = false;
-	const turns: { id: string; active: boolean }[] = [];
-	const messages = new Map<string, Message>();
-	let current_turn: string | null = null;
-	let previous_id: string | null = null;
+	const thread = codex_thread(result.native_id);
 	let previous_ordinal = -1;
-	function ensure_turn(id: string) {
-		const previous = turns.find((turn) => turn.id === id);
-		if (previous && !previous.active)
-			throw new InputError(
-				'unsupported',
-				'Reused rolled-back turn ID',
-			);
-		if (!previous) turns.push({ id, active: true });
-	}
 	for (const { value: entry, byte_offset } of records.slice(1)) {
 		validate_source(codex_entry_schema, entry, 'Codex', byte_offset);
 		const timestamp = date(entry.timestamp);
@@ -177,8 +164,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			continue;
 		}
 		if (entry.type === 'turn_context') {
-			current_turn = text(payload.turn_id);
-			ensure_turn(current_turn);
+			thread.begin_turn(payload.turn_id);
 			continue;
 		}
 		if (passive_entries.includes(String(entry.type))) continue;
@@ -187,31 +173,9 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			continue;
 		}
 		if (payload.type === 'task_started') {
-			current_turn = text(payload.turn_id);
-			ensure_turn(current_turn);
+			thread.begin_turn(payload.turn_id);
 		} else if (payload.type === 'thread_rolled_back') {
-			const count = payload.num_turns;
-			const live = turns.filter((turn) => turn.active);
-			if (
-				!Number.isSafeInteger(count) ||
-				Number(count) < 0 ||
-				Number(count) > live.length
-			)
-				throw new InputError(
-					'unsupported',
-					'Rollback cannot be resolved from available turns',
-				);
-			for (const turn of live.slice(live.length - Number(count)))
-				turn.active = false;
-			for (const message of messages.values())
-				message.active = turns.some(
-					(turn) => turn.id === message.turn_id && turn.active,
-				);
-			previous_id =
-				[...messages.values()]
-					.filter((message) => message.active)
-					.at(-1)?.native_id ?? null;
-			current_turn = null;
+			thread.roll_back(payload.num_turns);
 		} else if (payload.type === 'item_completed') {
 			const item = object(payload.item);
 			const item_type = text(item.type);
@@ -220,74 +184,24 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				item_type !== 'AgentMessage'
 			) {
 				if (!evidence_items.includes(item_type)) unknown_state = true;
-				continue;
-			}
-			if (
-				payload.thread_id !== undefined &&
-				payload.thread_id !== result.native_id
-			)
-				throw new InputError(
-					'unsupported',
-					'Completed item belongs to a different thread',
-				);
-			const turn_id =
-				typeof payload.turn_id === 'string'
-					? payload.turn_id
-					: current_turn;
-			if (!turn_id)
-				throw new InputError(
-					'unsupported',
-					'Dialogue without a turn ID',
-				);
-			ensure_turn(turn_id);
-			let content: string;
-			try {
-				content = codex_dialogue(item, byte_offset);
-			} catch (error) {
-				if (
-					error instanceof InputError &&
-					error.code === 'unsupported'
-				) {
-					unknown_state = true;
-					continue;
-				}
-				throw error;
-			}
-			const id = text(item.id);
-			const previous = messages.get(id);
-			const role = item_type === 'UserMessage' ? 'user' : 'assistant';
-			if (previous) {
-				if (previous.turn_id !== turn_id || previous.role !== role)
-					throw new InputError(
-						'unsupported',
-						'Conflicting completed item identity',
-					);
-				previous.content = content;
-				previous.timestamp = timestamp;
-				previous.source_order = byte_offset;
-			} else if (content.trim()) {
-				messages.set(id, {
-					native_id: id,
-					parent_id: previous_id,
-					role,
-					content,
+			} else if (
+				!thread.complete(
+					payload,
+					item,
+					item_type === 'UserMessage' ? 'user' : 'assistant',
 					timestamp,
-					source_order: byte_offset,
-					active: true,
-					turn_id,
-				});
-				previous_id = id;
-			}
+					byte_offset,
+				)
+			)
+				unknown_state = true;
 		} else if (turn_endings.includes(String(payload.type))) {
-			current_turn = null;
+			thread.end_turn();
 		} else if (!passive_events.includes(String(payload.type))) {
 			unknown_state = true;
 		}
 	}
-	result.messages = [...messages.values()];
-	result.inactive_turns = turns
-		.filter((t) => !t.active)
-		.map((t) => t.id);
+	result.messages = thread.messages();
+	result.inactive_turns = thread.inactive_turns();
 	const preserved = preserve_records(
 		records,
 		result,
