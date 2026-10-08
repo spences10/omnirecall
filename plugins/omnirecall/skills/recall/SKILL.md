@@ -1,9 +1,10 @@
 ---
 name: recall
 description:
-  Search local Claude Code, Codex, and Pi conversation history with
-  OmniRecall when the user wants to recover a previous discussion,
-  decision, fix, or command, including across coding agents.
+  Search local Claude Code, Codex, Pi, and OpenCode conversation
+  history with OmniRecall when the user wants to recover a previous
+  discussion, decision, fix, or command, including across coding
+  agents.
 ---
 
 # Recall coding conversations
@@ -20,8 +21,8 @@ archive. If the current environment lacks these capabilities, explain
 what is missing. Installing the plugin alone does not expose the
 user's computer to a remote chat.
 
-The tested CLI version is **0.0.4**. Use `pnpx omnirecall@0.0.4`, or
-`npx --yes omnirecall@0.0.4` when pnpm is unavailable. An installed
+The tested CLI version is **0.0.6**. Use `pnpx omnirecall@0.0.6`, or
+`npx --yes omnirecall@0.0.6` when pnpm is unavailable. An installed
 `omnirecall` of the same version is also suitable; check
 `info --json`. Package download errors are distinct from missing
 conversation history. Do not install global dependencies or change
@@ -33,6 +34,9 @@ command; otherwise keep the CLI's default path or existing
 `OMNIRECALL_DB` setting.
 
 ## Find and verify evidence
+
+Work from cheap to detailed and stop as soon as you can answer. Every
+command prints bounded JSON; add `--json` for single-line output.
 
 1. Inspect `sources --json` for archive coverage and last sync times.
    An unindexed archive or unavailable source is not evidence that the
@@ -46,39 +50,72 @@ command; otherwise keep the CLI's default path or existing
    usable indexed evidence may remain. Report relevant coverage gaps
    without claiming a complete search. A sync operates on whole source
    roots; project and session filters apply to retrieval only.
-3. Start with a small conversation search:
+3. Find the session. When you don't know which session holds the
+   answer, list matching sessions first:
 
    ```sh
-   pnpx omnirecall@0.0.4 recall 'plugin' --compact --json --limit 5 --context 1
+   pnpx omnirecall@0.0.6 search 'plugin' --by-session --json
    ```
+
+   Each row is one session with its `short_id`, `hits`, title, project
+   and best snippet. When the user names a title, project or date, use
+   `sessions --title … --after … --before …` instead.
 
    Queries use SQLite FTS5 syntax, not semantic search: words use AND;
    phrases use double quotes; `plugin OR marketplace` broadens a
    query. Quote the entire query safely for the current shell. Narrow
-   using dates, `--project`, or `--session` when relevant. Copy exact
-   project paths and source-qualified IDs from results or
-   `sessions --json`; do not guess them. `--agent` identifies the
-   authoring agent, not the assistant running the search. Avoid
-   assuming the relevant discussion happened in the current project or
-   agent.
+   using dates, `--project`, or `--session`. `--project` needs the
+   exact path: copy it and any `short_id` from results; do not guess
+   them. `--agent` identifies the authoring agent, not the assistant
+   running the search. Avoid assuming the relevant discussion happened
+   in the current project or agent.
 
-4. Read promising matches before drawing conclusions:
+4. Skim the session before reading it:
 
    ```sh
-   pnpx omnirecall@0.0.4 read '<exact ref returned by recall>' --json --context 2
+   pnpx omnirecall@0.0.6 outline '<short_id>' --json
    ```
 
-   In compact output, `results` contains match metadata and `messages`
-   contains text; join them by `ref`. If content is truncated,
-   continue with the returned `next_char_offset` as `--char-offset`.
-   For more search results, use `next_offset` with the same query and
-   filters. Increase `--max-bytes` or reduce the requested content if
-   the output budget prevents a useful response.
+   This lists the user's prompts and any stored summaries, one line
+   each, with a `ref` per row. It is the complete list of what the
+   user asked in that session.
 
-5. Broaden selectively if needed. Default searches cover conversation
-   messages. Use `--kind tool_result` or `--kind all` for commands and
-   execution evidence. Use `--include-history` when inactive branches
-   are relevant, preserving their state in the explanation.
+5. Get the exchange around a match:
+
+   ```sh
+   pnpx omnirecall@0.0.6 recall 'plugin' --session '<short_id>' --json
+   ```
+
+   `results` contains match metadata and `messages` contains text;
+   join them by `ref`. Metadata shared by every row sits once under
+   `shared`.
+
+6. Check what was actually run. For any message `ref`, list the tool
+   calls, results and operations in its turn:
+
+   ```sh
+   pnpx omnirecall@0.0.6 evidence '<ref>' --json
+   ```
+
+   Use this, not a keyword search over tool calls, to verify that work
+   happened.
+
+7. Read one message in full when a line or snippet is truncated:
+
+   ```sh
+   pnpx omnirecall@0.0.6 read '<ref>' --json
+   ```
+
+   `read` returns that message alone. Follow `previous_ref` /
+   `next_ref`, or add `--context 2`, for neighbours. If content is
+   truncated, continue with the returned `next_char_offset` as
+   `--char-offset`.
+
+For more rows from any command, pass its `next_offset` as `--offset`
+with the same arguments. Keep the default `--max-bytes`: page or
+narrow the query before raising it. Use `--include-history` only when
+inactive branches are relevant, preserving their state in the
+explanation.
 
 ## Answer from the recovered conversation
 

@@ -1,9 +1,9 @@
 # Install the OmniRecall plugin
 
 OmniRecall adds a recall skill for searching local Claude Code, Codex,
-and Pi conversations. Install it from this GitHub marketplace in the
-ChatGPT desktop app or Codex CLI. No source checkout is needed for the
-GitHub installation.
+Pi, and OpenCode conversations. Install it from this GitHub
+marketplace in the ChatGPT desktop app or Codex CLI. No source
+checkout is needed for the GitHub installation.
 
 ## Requirements
 

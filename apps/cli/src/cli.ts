@@ -69,7 +69,7 @@ const info = defineCommand({
 			status: 'preview',
 			capabilities,
 			agent_instructions:
-				'Use <command> --help for options; search --json, then read an exact ref.',
+				'Use <command> --help for options. Unsure which session: search --by-session. Skim one: outline <short_id>. Then recall for context, evidence <ref> for what was run, read <ref> for full text.',
 		};
 		console.log(
 			args.json

@@ -1,7 +1,7 @@
 # OmniRecall plugin
 
 Recover decisions, fixes, and commands from past Claude Code, Codex,
-and Pi conversations in a local assistant task.
+Pi, and OpenCode conversations in a local assistant task.
 
 This plugin adds a recall skill around the published OmniRecall CLI.
 The retrieval engine remains in the same repository under `apps/cli`
@@ -57,10 +57,10 @@ Ask naturally or invoke the bundled skill with `$recall` in Codex:
 
 > Find the command that fixed my earlier build failure.
 
-The skill checks coverage, syncs when a refresh is needed, retrieves
-bounded matches, and reads the original context before answering. A
-partial sync is reported as incomplete coverage, not a failed search
-with no history.
+The skill checks coverage, syncs when a refresh is needed, finds the
+session, skims its prompts, and reads only the context and tool
+evidence it needs before answering. A partial sync is reported as
+incomplete coverage, not a failed search with no history.
 
 ## Data handling
 
@@ -76,8 +76,8 @@ Keep the same archive selection throughout sync and retrieval.
 
 ## Development and release
 
-Plugin version **0.1.0** is independent of the CLI release. The skill
-pins the tested CLI to **0.0.4** for reproducible commands. When
+Plugin version **0.2.0** is independent of the CLI release. The skill
+pins the tested CLI to **0.0.6** for reproducible commands. When
 changing that pin, verify the commands and output fields in the skill
 against the new CLI version, then bump the plugin manifest version
 too.
