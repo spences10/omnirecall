@@ -13,11 +13,12 @@ import {
 	pi_entry,
 	pi_records,
 } from '../../../packages/core/src/fixtures.ts';
-import { run_cli, temp_dir } from './cli-fixture.ts';
+import { archive_cli, run_cli, temp_dir } from './cli-fixture.ts';
 
 test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed status', () => {
 	const root = temp_dir('omnirecall-cli-');
 	const db = join(root, 'index.sqlite');
+	const run = archive_cli(db);
 	const pi_root = join(root, 'pi');
 	const codex_root = join(root, 'codex');
 	const unindexed = run_cli([
@@ -30,9 +31,8 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 	expect(unindexed.status).toBe(0);
 	expect(JSON.parse(unindexed.stdout).status).toBe('unindexed');
 	expect(existsSync(db)).toBe(false);
-	const no_roots = run_cli(['sync', '--db', db, '--json']);
-	expect(no_roots.status).toBe(0);
-	expect(JSON.parse(no_roots.stdout).status).toBe('empty');
+	const no_roots = run(['sync']);
+	expect(no_roots.status).toBe('empty');
 	expect(existsSync(db)).toBe(true);
 	mkdirSync(pi_root);
 	mkdirSync(codex_root);
@@ -41,27 +41,15 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 		join(codex_root, 'test.jsonl'),
 		jsonl(codex_records()),
 	);
-	const imported = run_cli([
+	const imported = run([
 		'sync',
 		'--pi-root',
 		pi_root,
 		'--codex-root',
 		codex_root,
-		'--db',
-		db,
-		'--json',
 	]);
-	expect(imported.status, imported.stdout).toBe(0);
-	expect(JSON.parse(imported.stdout).sessions_updated).toBe(2);
-	const recalled = run_cli([
-		'recall',
-		'café migrations',
-		'--db',
-		db,
-		'--json',
-	]);
-	expect(recalled.status, recalled.stdout).toBe(0);
-	const result = JSON.parse(recalled.stdout);
+	expect(imported.sessions_updated).toBe(2);
+	const result = run(['recall', 'café migrations']);
 	expect(
 		result.results.map((row: { agent: string }) => row.agent).sort(),
 	).toEqual(['codex', 'pi']);
@@ -74,16 +62,8 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 		expect(content(row.after[0])).toBe('Confirm the final checks');
 	}
 	const original_db = readFileSync(db);
-	const filtered = run_cli([
-		'sessions',
-		'--agent',
-		'pi',
-		'--db',
-		db,
-		'--json',
-	]);
-	expect(filtered.status, filtered.stdout).toBe(0);
-	expect(JSON.parse(filtered.stdout).results).toHaveLength(1);
+	const filtered = run(['sessions', '--agent', 'pi']);
+	expect(filtered.results).toHaveLength(1);
 	expect(readFileSync(db)).toEqual(original_db);
 	const unknown = run_cli([
 		'search',
@@ -145,34 +125,25 @@ test('end-to-end cross-agent recall, bounded JSON, explicit roots and unindexed 
 	]);
 	expect(Buffer.byteLength(bounded.stdout)).toBeLessThanOrEqual(1024);
 	expect(JSON.parse(bounded.stdout).truncated).toBe(true);
-	const partial = run_cli([
-		'sync',
-		'--pi-root',
-		join(root, 'missing'),
-		'--codex-root',
-		codex_root,
-		'--db',
-		db,
-		'--json',
-	]);
-	expect(partial.status).toBe(2);
-	expect(JSON.parse(partial.stdout).issues[0].code).toBe('missing');
+	const partial = run(
+		[
+			'sync',
+			'--pi-root',
+			join(root, 'missing'),
+			'--codex-root',
+			codex_root,
+		],
+		2,
+	);
+	expect(partial.issues[0].code).toBe('missing');
 	for (const args of [
 		['--limit', '0'],
 		['--agent', 'invalid'],
 		['--after', 'invalid'],
 		['--max-bytes', '1'],
 	]) {
-		const invalid = run_cli([
-			'recall',
-			'migrations',
-			'--db',
-			db,
-			'--json',
-			...args,
-		]);
-		expect(invalid.status).toBe(1);
-		expect(JSON.parse(invalid.stdout).status).toBe('error');
+		const invalid = run(['recall', 'migrations', ...args], 1);
+		expect(invalid.status).toBe('error');
 	}
 });
 
@@ -323,9 +294,7 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 	const root = temp_dir('omnirecall-compact-');
 	const db = join(root, 'archive.db');
 	const pi_root = join(root, 'pi');
-	function run(args: string[]) {
-		return run_cli([...args, '--db', db, '--json']);
-	}
+	const run = archive_cli(db).outcome;
 	mkdirSync(pi_root);
 	writeFileSync(
 		join(pi_root, 'session.jsonl'),
@@ -342,20 +311,20 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 	expect(run(['sync', '--pi-root', pi_root]).status).toBe(0);
 	const compact = run(['search', 'migrationneedle']);
 	const full = run(['search', 'migrationneedle', '--full']);
-	expect(compact.status, compact.stdout).toBe(0);
-	expect(full.status, full.stdout).toBe(0);
-	const hit = JSON.parse(compact.stdout).results[0];
-	expect(JSON.parse(compact.stdout)).toMatchObject({
+	expect(compact.status, compact.text).toBe(0);
+	expect(full.status, full.text).toBe(0);
+	const hit = compact.data.results[0];
+	expect(compact.data).toMatchObject({
 		schema_version: 3,
 		format: 'compact',
 	});
-	expect(JSON.parse(full.stdout)).toMatchObject({
+	expect(full.data).toMatchObject({
 		schema_version: 1,
 	});
 	expect(hit).not.toHaveProperty('content');
 	expect(hit.snippet).toContain('migrationneedle');
-	expect(Buffer.byteLength(compact.stdout)).toBeLessThan(
-		Buffer.byteLength(full.stdout) / 2,
+	expect(Buffer.byteLength(compact.text)).toBeLessThan(
+		Buffer.byteLength(full.text) / 2,
 	);
 	const original = readFileSync(db);
 	const read = run([
@@ -366,28 +335,22 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 		'--context',
 		'0',
 	]);
-	expect(read.status, read.stdout).toBe(0);
-	expect(JSON.parse(read.stdout).messages[0].content).toContain(
-		'migrationneedle',
-	);
+	expect(read.status, read.text).toBe(0);
+	expect(read.data.messages[0].content).toContain('migrationneedle');
 	expect(readFileSync(db)).toEqual(original);
 	// Compact output carries short refs; canonical refs keep working.
 	expect(hit.ref).toMatch(/^m2\.[a-f0-9]{12}\.[A-Za-z0-9_-]{11}$/);
-	const detailed = JSON.parse(full.stdout).results[0];
+	const detailed = full.data.results[0];
 	const canonical = `m1.${detailed.archive_id}.${Buffer.from(detailed.native_id).toString('base64url')}`;
-	const focused = JSON.parse(read.stdout).results[0];
+	const focused = read.data.results[0];
 	expect(
-		JSON.parse(run(['read', canonical, '--context', '0']).stdout)
-			.results[0].ref,
+		run(['read', canonical, '--context', '0']).data.results[0].ref,
 	).toBe(hit.ref);
 	expect(focused.record_ref).toMatch(/^r2\.[a-f0-9]{12}\./);
 	const raw = run(['read', focused.record_ref]);
-	expect(raw.status, raw.stdout).toBe(0);
-	expect(JSON.parse(raw.stdout).results[0].content).toContain(
-		'"id":"long"',
-	);
-	const listed = JSON.parse(run(['sessions', '--compact']).stdout)
-		.results[0];
+	expect(raw.status, raw.text).toBe(0);
+	expect(raw.data.results[0].content).toContain('"id":"long"');
+	const listed = run(['sessions', '--compact']).data.results[0];
 	expect(listed.first_record_ref).toMatch(/^r2\./);
 	expect(run(['read', listed.first_record_ref]).status).toBe(0);
 	for (const missing of [
@@ -395,39 +358,40 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 		`m2.${'0'.repeat(12)}.${hit.ref.split('.')[2]}`,
 	]) {
 		const absent = run(['read', missing]);
-		expect(absent.status, absent.stdout).toBe(1);
-		expect(JSON.parse(absent.stdout).code).toBe('not_found');
+		expect(absent.status, absent.text).toBe(1);
+		expect(absent.data.code).toBe('not_found');
 	}
-	const first = JSON.parse(
-		run(['read', hit.ref, '--context', '0', '--chars', '20']).stdout,
-	);
+	const first = run([
+		'read',
+		hit.ref,
+		'--context',
+		'0',
+		'--chars',
+		'20',
+	]).data;
 	expect(first.messages[0].next_char_offset).toBe(20);
-	const next = JSON.parse(
-		run([
-			'read',
-			hit.ref,
-			'--context',
-			'0',
-			'--chars',
-			'20',
-			'--char-offset',
-			'20',
-		]).stdout,
-	);
+	const next = run([
+		'read',
+		hit.ref,
+		'--context',
+		'0',
+		'--chars',
+		'20',
+		'--char-offset',
+		'20',
+	]).data;
 	expect(next.messages[0].char_offset).toBe(20);
 	const recall = run(['recall', 'database', '--compact']);
-	expect(recall.status, recall.stdout).toBe(0);
-	expect(JSON.parse(recall.stdout)).toMatchObject({
+	expect(recall.status, recall.text).toBe(0);
+	expect(recall.data).toMatchObject({
 		schema_version: 3,
 		format: 'compact',
 	});
-	expect(JSON.parse(recall.stdout).messages.length).toBeGreaterThan(
-		0,
-	);
+	expect(recall.data.messages.length).toBeGreaterThan(0);
 	const bounded = run(['read', hit.ref, '--max-bytes', '1024']);
 	expect(bounded.status).toBe(0);
-	expect(Buffer.byteLength(bounded.stdout)).toBeLessThanOrEqual(1024);
-	expect(JSON.parse(bounded.stdout)).toMatchObject({
+	expect(Buffer.byteLength(bounded.text)).toBeLessThanOrEqual(1024);
+	expect(bounded.data).toMatchObject({
 		schema_version: 3,
 		output_budget_exceeded: true,
 		returned_count: 0,
@@ -447,7 +411,7 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 		['search', 'migration', '--chars', '10'],
 	]) {
 		const invalid = run(args);
-		expect(invalid.status, invalid.stdout).toBe(1);
-		expect(JSON.parse(invalid.stdout).code).toBe('arguments');
+		expect(invalid.status, invalid.text).toBe(1);
+		expect(invalid.data.code).toBe('arguments');
 	}
 });

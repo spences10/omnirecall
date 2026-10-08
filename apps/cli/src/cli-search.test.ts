@@ -8,11 +8,12 @@ import {
 	pi_entry,
 	pi_records,
 } from '../../../packages/core/src/fixtures.ts';
-import { run_cli, temp_dir } from './cli-fixture.ts';
+import { archive_cli, run_cli, temp_dir } from './cli-fixture.ts';
 
 test('search and recall include whole UTC days but preserve exact timestamp bounds', () => {
 	const root = temp_dir('omnirecall-dates-');
 	const db = join(root, 'archive.db');
+	const run = archive_cli(db);
 	const pi_root = join(root, 'pi');
 	mkdirSync(pi_root);
 	const stamps = [
@@ -107,16 +108,8 @@ test('search and recall include whole UTC days but preserve exact timestamp boun
 			['--after', 'invalid'],
 			['--before', 'invalid'],
 		]) {
-			const response = run_cli([
-				command,
-				'dateprobe',
-				'--db',
-				db,
-				'--json',
-				...bounds,
-			]);
-			expect(response.status).toBe(1);
-			expect(JSON.parse(response.stdout).status).toBe('error');
+			const response = run([command, 'dateprobe', ...bounds], 1);
+			expect(response.status).toBe('error');
 		}
 	}
 });
@@ -125,10 +118,7 @@ test('search --by-session lists each matching session once with hit counts and a
 	const root = temp_dir('omnirecall-grouped-');
 	const db = join(root, 'archive.db');
 	const pi_root = join(root, 'pi');
-	function run(args: string[]) {
-		const result = run_cli([...args, '--db', db, '--json']);
-		return { status: result.status, data: JSON.parse(result.stdout) };
-	}
+	const run = archive_cli(db).outcome;
 	mkdirSync(pi_root);
 	writeFileSync(
 		join(pi_root, 'busy.jsonl'),
@@ -230,18 +220,7 @@ test('search --by-session lists each matching session once with hit counts and a
 test('default search and recall exclude Codex reviewer context while explicit reads retain it', () => {
 	const root = temp_dir('omni-reviewer-');
 	const db = join(root, 'archive.db');
-	const run = (args: string[]) => {
-		const response = run_cli([
-			...args,
-			'--db',
-			db,
-			'--json',
-			'--max-bytes',
-			'65536',
-		]);
-		expect(response.status, response.stdout).toBe(0);
-		return JSON.parse(response.stdout);
-	};
+	const run = archive_cli(db, { flags: ['--max-bytes', '65536'] });
 	writeFileSync(
 		join(root, 'main.jsonl'),
 		jsonl(codex_records('main')),
@@ -296,6 +275,7 @@ test('default search and recall exclude Codex reviewer context while explicit re
 test('FTS5 syntax works through search and recall with actionable malformed-query errors', () => {
 	const root = temp_dir('omni-fts-');
 	const db = join(root, 'archive.db');
+	const run = archive_cli(db);
 	writeFileSync(
 		join(root, 'session.jsonl'),
 		jsonl([
@@ -317,40 +297,19 @@ test('FTS5 syntax works through search and recall with actionable malformed-quer
 		['recall'],
 		['recall', '--full'],
 	]) {
-		const result = run_cli([
-			...mode,
-			'"café migrations" OR nonexistent',
-			'--db',
-			db,
-			'--json',
-		]);
-		expect(result.status, result.stdout).toBe(0);
-		expect(JSON.parse(result.stdout).results).toHaveLength(1);
+		const result = run([...mode, '"café migrations" OR nonexistent']);
+		expect(result.results).toHaveLength(1);
 		for (const term of [
 			'my-pi',
 			'node.js',
 			'@scope/pkg',
 			'packages/core/index.ts',
 		]) {
-			const punctuated = run_cli([
-				...mode,
-				`${term} AND deps`,
-				'--db',
-				db,
-				'--json',
-			]);
-			expect(punctuated.status, punctuated.stdout).toBe(0);
-			expect(JSON.parse(punctuated.stdout).results).toHaveLength(1);
+			const punctuated = run([...mode, `${term} AND deps`]);
+			expect(punctuated.results).toHaveLength(1);
 		}
-		const invalid = run_cli([
-			...mode,
-			'migration OR',
-			'--db',
-			db,
-			'--json',
-		]);
-		expect(invalid.status).toBe(1);
-		expect(JSON.parse(invalid.stdout)).toMatchObject({
+		const invalid = run([...mode, 'migration OR'], 1);
+		expect(invalid).toMatchObject({
 			status: 'error',
 			code: 'arguments',
 			message: expect.stringContaining('Invalid FTS5 query'),

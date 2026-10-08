@@ -7,11 +7,12 @@ import {
 	put_message as put_opencode_message,
 } from '../../../packages/adapter-opencode/src/fixtures.ts';
 import { jsonl } from '../../../packages/core/src/fixtures.ts';
-import { run_cli, temp_dir } from './cli-fixture.ts';
+import { archive_cli, run_cli, temp_dir } from './cli-fixture.ts';
 
 test('Claude tool search and raw-record continuation work through the built CLI', () => {
 	const root = temp_dir('omni-claude-cli-');
 	const db = join(root, 'archive.db');
+	const run = archive_cli(db);
 	writeFileSync(
 		join(root, 'session.jsonl'),
 		jsonl([
@@ -64,16 +65,8 @@ test('Claude tool search and raw-record continuation work through the built CLI'
 		[[], 0],
 		[['--kind', 'all'], 1],
 	] as const) {
-		const result = run_cli([
-			'search',
-			'tool_unique_failure',
-			'--db',
-			db,
-			'--json',
-			...flags,
-		]);
-		expect(result.status).toBe(0);
-		expect(JSON.parse(result.stdout).results).toHaveLength(count);
+		const result = run(['search', 'tool_unique_failure', ...flags]);
+		expect(result.results).toHaveLength(count);
 	}
 	const search = run_cli([
 		'search',
@@ -120,11 +113,7 @@ test('OpenCode v2 is discovered through XDG and supports CLI retrieval from live
 	const writer = create_opencode(join(opencode_root, 'opencode.db'));
 	const db = join(root, 'archive.db');
 	const env = { XDG_DATA_HOME: data };
-	const run = (args: string[]) => {
-		const response = run_cli([...args, '--db', db, '--json'], env);
-		expect(response.status, response.stdout).toBe(0);
-		return JSON.parse(response.stdout);
-	};
+	const run = archive_cli(db, { env });
 	try {
 		expect(run(['sync', '--agent', 'opencode'])).toMatchObject({
 			sources_selected: 1,

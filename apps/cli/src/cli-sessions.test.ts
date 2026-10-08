@@ -7,7 +7,7 @@ import {
 	pi_entry,
 	pi_records,
 } from '../../../packages/core/src/fixtures.ts';
-import { run_cli, temp_dir } from './cli-fixture.ts';
+import { archive_cli, run_cli, temp_dir } from './cli-fixture.ts';
 
 test('session discovery combines title/date filters with safe short identifiers', () => {
 	const root = temp_dir('omnirecall-discovery-');
@@ -15,18 +15,7 @@ test('session discovery combines title/date filters with safe short identifiers'
 	const pi_root = join(root, 'pi');
 	const codex_root = join(root, 'codex');
 	const first_id = '12345678-aaaa-4000-8000-000000000001';
-	const run = (args: string[]) => {
-		const result = run_cli([
-			...args,
-			'--db',
-			db,
-			'--json',
-			'--max-bytes',
-			'65536',
-		]);
-		expect(result.status, result.stdout).toBe(0);
-		return JSON.parse(result.stdout);
-	};
+	const run = archive_cli(db, { flags: ['--max-bytes', '65536'] });
 	mkdirSync(pi_root);
 	mkdirSync(codex_root);
 	for (const [id, title, timestamp] of [
@@ -218,10 +207,7 @@ test("outline lists one session's user prompts and summaries with readable refs"
 	const root = temp_dir('omnirecall-outline-');
 	const db = join(root, 'archive.db');
 	const pi_root = join(root, 'pi');
-	function run(args: string[]) {
-		const result = run_cli([...args, '--db', db, '--json']);
-		return { status: result.status, data: JSON.parse(result.stdout) };
-	}
+	const run = archive_cli(db).outcome;
 	expect(run(['outline', 'anything']).data.code).toBe('unindexed');
 	mkdirSync(pi_root);
 	writeFileSync(
@@ -322,10 +308,7 @@ test('evidence lists the tool activity of the turn containing a message', () => 
 	const root = temp_dir('omnirecall-evidence-');
 	const db = join(root, 'archive.db');
 	const pi_root = join(root, 'pi');
-	function run(args: string[]) {
-		const result = run_cli([...args, '--db', db, '--json']);
-		return { status: result.status, data: JSON.parse(result.stdout) };
-	}
+	const run = archive_cli(db).outcome;
 	mkdirSync(pi_root);
 	writeFileSync(
 		join(pi_root, 'session.jsonl'),

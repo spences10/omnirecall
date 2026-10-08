@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, onTestFinished } from 'vitest';
+import { afterAll, expect, onTestFinished } from 'vitest';
 
 const entry_path = fileURLToPath(
 	new URL('../dist/index.js', import.meta.url),
@@ -32,6 +32,37 @@ export function run_cli(args: string[], env: NodeJS.ProcessEnv = {}) {
 			...env,
 		},
 	});
+}
+
+/**
+ * A runner bound to one archive. It adds --db and --json, asserts the exit
+ * status and returns the parsed output. `outcome` skips the assertion and
+ * returns the status beside the output.
+ */
+export function archive_cli(
+	db: string,
+	{
+		env = {},
+		flags = [],
+	}: { env?: NodeJS.ProcessEnv; flags?: string[] } = {},
+) {
+	const outcome = (args: string[]) => {
+		const response = run_cli(
+			[...args, '--db', db, '--json', ...flags],
+			env,
+		);
+		return {
+			status: response.status,
+			text: response.stdout,
+			data: JSON.parse(response.stdout),
+		};
+	};
+	const run = (args: string[], status = 0) => {
+		const result = outcome(args);
+		expect(result.status, result.text).toBe(status);
+		return result.data;
+	};
+	return Object.assign(run, { outcome });
 }
 
 /** A temporary directory, removed when the current test finishes. */
