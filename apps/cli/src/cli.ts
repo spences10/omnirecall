@@ -6,26 +6,30 @@ import { codex_adapter } from '../../../packages/adapter-codex/src/index.ts';
 import { opencode_adapter } from '../../../packages/adapter-opencode/src/index.ts';
 import { pi_adapter } from '../../../packages/adapter-pi/src/index.ts';
 import {
-	Archive,
-	type QueryOptions,
-} from '../../../packages/core/src/database.ts';
-import { source_config } from '../../../packages/core/src/files.ts';
-import { bounded_json } from '../../../packages/core/src/output.ts';
-import {
 	compact_outline,
 	compact_recall,
 	compact_search,
 	compact_session_matches,
 	compact_sessions,
 	excerpt_chars,
+} from '../../../packages/core/src/compact.ts';
+import {
+	Archive,
+	type QueryOptions,
+} from '../../../packages/core/src/database.ts';
+import { source_config } from '../../../packages/core/src/files.ts';
+import { bounded_json } from '../../../packages/core/src/output.ts';
+import {
 	focused_read,
-	is_short_ref,
-	parse_ref,
 	raw_read,
-	short_refs,
 	slim_read,
 	turn_evidence,
-} from '../../../packages/core/src/retrieval.ts';
+} from '../../../packages/core/src/read.ts';
+import {
+	is_short_ref,
+	parse_ref,
+	short_refs,
+} from '../../../packages/core/src/refs.ts';
 import { error_code, sync } from '../../../packages/core/src/sync.ts';
 import {
 	InputError,

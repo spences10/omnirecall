@@ -1,17 +1,16 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { parse_pi } from '../../adapter-pi/src/index.ts';
-import { Archive } from './database.ts';
-import { digest, source_config } from './files.ts';
-import { pi_entry, pi_records, timestamp } from './fixtures.ts';
-import { bounded_json } from './output.ts';
 import {
 	compact_recall,
 	compact_search,
 	compact_sessions,
-	focused_read,
-	message_ref,
-	parse_ref,
-} from './retrieval.ts';
+} from './compact.ts';
+import { Archive } from './database.ts';
+import { digest, source_config } from './files.ts';
+import { pi_entry, pi_records, timestamp } from './fixtures.ts';
+import { bounded_json } from './output.ts';
+import { focused_read } from './read.ts';
+import { message_ref, parse_ref } from './refs.ts';
 import type { Transcript } from './types.ts';
 
 let archive: Archive;

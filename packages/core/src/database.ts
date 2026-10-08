@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { digest, parser_version } from './files.ts';
 import { sql } from './queries.ts';
+import { record_ref } from './refs.ts';
 import { apply_schema } from './schema.ts';
 import { search_expression } from './search-query.ts';
 import { parse_cache, type SyncCache } from './sync-cache.ts';
@@ -511,7 +512,7 @@ export class Archive {
 				...row,
 				short_id: this.#short_session_id(row.archive_id),
 				first_record_ref: first
-					? `r1.${row.archive_id}.${Buffer.from(String(first.record_key)).toString('base64url')}`
+					? record_ref(row.archive_id, String(first.record_key))
 					: null,
 			};
 		});

@@ -10,11 +10,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from 'vitest';
 import { Archive } from '../../core/src/database.ts';
 import { source_config } from '../../core/src/files.ts';
-import {
-	focused_read,
-	message_ref,
-	raw_read,
-} from '../../core/src/retrieval.ts';
+import { focused_read, raw_read } from '../../core/src/read.ts';
+import { message_ref } from '../../core/src/refs.ts';
 import { sync } from '../../core/src/sync.ts';
 import {
 	create_fixture,

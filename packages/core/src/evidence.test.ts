@@ -23,7 +23,8 @@ import {
 	pi_records,
 	timestamp,
 } from './fixtures.ts';
-import { focused_read, message_ref, raw_read } from './retrieval.ts';
+import { focused_read, raw_read } from './read.ts';
+import { message_ref } from './refs.ts';
 import { sync } from './sync.ts';
 import type { Adapter } from './types.ts';
 const options = { limit: 100, offset: 0, context: 1 };
