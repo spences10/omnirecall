@@ -1,14 +1,14 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from 'vitest';
 import {
+	application_id,
 	apply_schema,
 	archive_schema,
-	application_id,
 	type SchemaDefinition,
 } from './schema.ts';
+import { temp_dir } from './test-support.ts';
 
 const upgrade: SchemaDefinition = {
 	...archive_schema,
@@ -158,40 +158,36 @@ test('initialization failure rolls back schema creation and ownership metadata',
 });
 
 test('read-only opens never upgrade; outdated and newer archives remain byte-identical', () => {
-	const root = mkdtempSync(join(tmpdir(), 'omni-migrations-'));
+	const root = temp_dir('omni-migrations-');
 	const path = join(root, 'archive.db');
+	const writer = new DatabaseSync(path);
+	fixture(writer);
+	writer.close();
+	const original = readFileSync(path);
+	const reader = new DatabaseSync(path, { readOnly: true });
 	try {
-		const writer = new DatabaseSync(path);
-		fixture(writer);
-		writer.close();
-		const original = readFileSync(path);
-		const reader = new DatabaseSync(path, { readOnly: true });
-		try {
-			apply_schema(reader, { read_only: true });
-			expect(() =>
-				apply_schema(reader, { read_only: true }, upgrade),
-			).toThrow('run omnirecall sync');
-		} finally {
-			reader.close();
-		}
-		expect(readFileSync(path)).toEqual(original);
-		const newer = new DatabaseSync(path);
-		apply_schema(newer, {}, upgrade);
-		newer.close();
-		const upgraded = readFileSync(path);
-		for (const read_only of [true, false]) {
-			const db = new DatabaseSync(path, { readOnly: read_only });
-			try {
-				expect(() => apply_schema(db, { read_only })).toThrow(
-					'newer than supported',
-				);
-			} finally {
-				db.close();
-			}
-			expect(readFileSync(path)).toEqual(upgraded);
-		}
+		apply_schema(reader, { read_only: true });
+		expect(() =>
+			apply_schema(reader, { read_only: true }, upgrade),
+		).toThrow('run omnirecall sync');
 	} finally {
-		rmSync(root, { recursive: true, force: true });
+		reader.close();
+	}
+	expect(readFileSync(path)).toEqual(original);
+	const newer = new DatabaseSync(path);
+	apply_schema(newer, {}, upgrade);
+	newer.close();
+	const upgraded = readFileSync(path);
+	for (const read_only of [true, false]) {
+		const db = new DatabaseSync(path, { readOnly: read_only });
+		try {
+			expect(() => apply_schema(db, { read_only })).toThrow(
+				'newer than supported',
+			);
+		} finally {
+			db.close();
+		}
+		expect(readFileSync(path)).toEqual(upgraded);
 	}
 });
 

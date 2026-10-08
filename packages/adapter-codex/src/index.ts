@@ -1,29 +1,96 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { preserve_records } from '../../adapter-shared/src/evidence.ts';
 import {
-	codex_dialogue,
+	obj,
+	preserve_records,
+} from '../../adapter-shared/src/evidence.ts';
+import {
 	codex_entry_schema,
 	codex_header_schema,
 	codex_realtime_schema,
 	codex_title_schema,
 	validate_source,
 } from '../../adapter-shared/src/schemas.ts';
+import { InputError } from '../../core/src/errors.ts';
 import {
 	discover_jsonl,
 	jsonl_adapter,
 	read_snapshot,
 } from '../../core/src/files.ts';
 import {
+	all_parts,
 	date,
-	InputError,
 	metadata,
 	object,
 	text,
-	type Message,
-	type RecordLine,
-	type Transcript,
+} from '../../core/src/readers.ts';
+import type {
+	JsonObject,
+	RecordLine,
+	Transcript,
 } from '../../core/src/types.ts';
+import { codex_evidence } from './evidence.ts';
+import { codex_thread } from './thread.ts';
+
+// Known native types. Anything else leaves the session's activity unknown.
+const response_items = [
+	'message',
+	'reasoning',
+	'function_call',
+	'function_call_output',
+	'custom_tool_call',
+	'custom_tool_call_output',
+	'web_search_call',
+	'local_shell_call',
+];
+const realtime_items = [
+	'realtime_session_started',
+	'transcript_segment',
+	'realtime_session_closed',
+];
+/** Entry types that carry no dialogue and never change turn state. */
+const passive_entries = [
+	'response_item',
+	'token_usage_record',
+	'compacted',
+	'world_state',
+];
+/** Completed items kept as evidence rather than dialogue. */
+const evidence_items = [
+	'Reasoning',
+	'CommandExecution',
+	'FileChange',
+	'McpToolCall',
+	'DynamicToolCall',
+	'WebSearch',
+	'ImageView',
+	'ImageGeneration',
+	'Plan',
+	'CollabAgentToolCall',
+	'CollabToolCall',
+	'Extension',
+	'ContextCompaction',
+];
+const turn_endings = ['task_complete', 'turn_aborted'];
+const passive_events = [
+	'token_count',
+	'user_message',
+	'agent_message',
+	'thread_settings_applied',
+];
+
+// Approval reviewers receive machine-supplied conversation copies as user
+// messages. Classify by explicit provenance, never by body text or filename.
+function is_approval_reviewer(meta: JsonObject) {
+	const source = obj(meta.source);
+	const reviewer_name = obj(source.subagent).other;
+	return (
+		reviewer_name === 'guardian' ||
+		reviewer_name === 'approval_reviewer' ||
+		source.internal === 'guardian' ||
+		meta.thread_source === 'guardian_review'
+	);
+}
 
 export function parse_codex(records: RecordLine[]): Transcript {
 	const header = records[0]?.value;
@@ -44,25 +111,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		'Codex',
 		records[0]!.byte_offset,
 	);
-	// Approval reviewers receive machine-supplied conversation copies as user
-	// messages. Classify by explicit provenance, never by body text or filename.
-	const source =
-		meta.source &&
-		typeof meta.source === 'object' &&
-		!Array.isArray(meta.source)
-			? object(meta.source)
-			: {};
-	const reviewer_name =
-		source.subagent &&
-		typeof source.subagent === 'object' &&
-		!Array.isArray(source.subagent)
-			? object(source.subagent).other
-			: undefined;
-	const approval_reviewer =
-		reviewer_name === 'guardian' ||
-		reviewer_name === 'approval_reviewer' ||
-		source.internal === 'guardian' ||
-		meta.thread_source === 'guardian_review';
+	const approval_reviewer = is_approval_reviewer(meta);
 	const result: Transcript = {
 		native_id: text(meta.id),
 		project: text(meta.cwd),
@@ -75,20 +124,8 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		unindexed_records: 0,
 	};
 	let unknown_state = false;
-	const turns: { id: string; active: boolean }[] = [];
-	const messages = new Map<string, Message>();
-	let current_turn: string | null = null;
-	let previous_id: string | null = null;
+	const thread = codex_thread(result.native_id);
 	let previous_ordinal = -1;
-	function ensure_turn(id: string) {
-		const previous = turns.find((turn) => turn.id === id);
-		if (previous && !previous.active)
-			throw new InputError(
-				'unsupported',
-				'Reused rolled-back turn ID',
-			);
-		if (!previous) turns.push({ id, active: true });
-	}
 	for (const { value: entry, byte_offset } of records.slice(1)) {
 		validate_source(codex_entry_schema, entry, 'Codex', byte_offset);
 		const timestamp = date(entry.timestamp);
@@ -106,32 +143,17 @@ export function parse_codex(records: RecordLine[]): Transcript {
 		const payload = object(entry.payload);
 		if (
 			entry.type === 'response_item' &&
-			![
-				'message',
-				'reasoning',
-				'function_call',
-				'function_call_output',
-				'custom_tool_call',
-				'custom_tool_call_output',
-				'web_search_call',
-				'local_shell_call',
-			].includes(String(payload.type))
+			!response_items.includes(String(payload.type))
 		) {
 			unknown_state = true;
-			result.unindexed_records++;
 			continue;
 		}
 		if (entry.type === 'realtime_item') {
 			if (
 				typeof payload.type === 'string' &&
-				![
-					'realtime_session_started',
-					'transcript_segment',
-					'realtime_session_closed',
-				].includes(payload.type)
+				!realtime_items.includes(payload.type)
 			) {
 				unknown_state = true;
-				result.unindexed_records++;
 				continue;
 			}
 			validate_source(
@@ -144,52 +166,18 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			continue;
 		}
 		if (entry.type === 'turn_context') {
-			current_turn = text(payload.turn_id);
-			ensure_turn(current_turn);
+			thread.begin_turn(payload.turn_id);
 			continue;
 		}
-		if (
-			[
-				'response_item',
-				'token_usage_record',
-				'compacted',
-				'world_state',
-			].includes(String(entry.type))
-		) {
-			result.unindexed_records++;
-			continue;
-		}
+		if (passive_entries.includes(String(entry.type))) continue;
 		if (entry.type !== 'event_msg') {
 			unknown_state = true;
-			result.unindexed_records++;
 			continue;
 		}
 		if (payload.type === 'task_started') {
-			current_turn = text(payload.turn_id);
-			ensure_turn(current_turn);
+			thread.begin_turn(payload.turn_id);
 		} else if (payload.type === 'thread_rolled_back') {
-			const count = payload.num_turns;
-			const live = turns.filter((turn) => turn.active);
-			if (
-				!Number.isSafeInteger(count) ||
-				Number(count) < 0 ||
-				Number(count) > live.length
-			)
-				throw new InputError(
-					'unsupported',
-					'Rollback cannot be resolved from available turns',
-				);
-			for (const turn of live.slice(live.length - Number(count)))
-				turn.active = false;
-			for (const message of messages.values())
-				message.active = turns.some(
-					(turn) => turn.id === message.turn_id && turn.active,
-				);
-			previous_id =
-				[...messages.values()]
-					.filter((message) => message.active)
-					.at(-1)?.native_id ?? null;
-			current_turn = null;
+			thread.roll_back(payload.num_turns);
 		} else if (payload.type === 'item_completed') {
 			const item = object(payload.item);
 			const item_type = text(item.type);
@@ -197,116 +185,32 @@ export function parse_codex(records: RecordLine[]): Transcript {
 				item_type !== 'UserMessage' &&
 				item_type !== 'AgentMessage'
 			) {
-				if (
-					![
-						'Reasoning',
-						'CommandExecution',
-						'FileChange',
-						'McpToolCall',
-						'DynamicToolCall',
-						'WebSearch',
-						'ImageView',
-						'ImageGeneration',
-						'Plan',
-						'CollabAgentToolCall',
-						'CollabToolCall',
-						'Extension',
-						'ContextCompaction',
-					].includes(item_type)
-				) {
-					unknown_state = true;
-					result.unindexed_records++;
-					continue;
-				}
-				result.unindexed_records++;
-				continue;
-			}
-			if (
-				payload.thread_id !== undefined &&
-				payload.thread_id !== result.native_id
-			)
-				throw new InputError(
-					'unsupported',
-					'Completed item belongs to a different thread',
-				);
-			const turn_id =
-				typeof payload.turn_id === 'string'
-					? payload.turn_id
-					: current_turn;
-			if (!turn_id)
-				throw new InputError(
-					'unsupported',
-					'Dialogue without a turn ID',
-				);
-			ensure_turn(turn_id);
-			let content: string;
-			try {
-				content = codex_dialogue(item, byte_offset);
-			} catch (error) {
-				if (
-					error instanceof InputError &&
-					error.code === 'unsupported'
-				) {
-					unknown_state = true;
-					result.unindexed_records++;
-					continue;
-				}
-				throw error;
-			}
-			const id = text(item.id);
-			const previous = messages.get(id);
-			const role = item_type === 'UserMessage' ? 'user' : 'assistant';
-			if (previous) {
-				if (previous.turn_id !== turn_id || previous.role !== role)
-					throw new InputError(
-						'unsupported',
-						'Conflicting completed item identity',
-					);
-				previous.content = content;
-				previous.timestamp = timestamp;
-				previous.source_order = byte_offset;
-			} else if (content.trim()) {
-				messages.set(id, {
-					native_id: id,
-					parent_id: previous_id,
-					role,
-					content,
+				if (!evidence_items.includes(item_type)) unknown_state = true;
+			} else if (
+				!thread.complete(
+					payload,
+					item,
+					item_type === 'UserMessage' ? 'user' : 'assistant',
 					timestamp,
-					source_order: byte_offset,
-					active: true,
-					turn_id,
-				});
-				previous_id = id;
-			}
-		} else if (
-			['task_complete', 'turn_aborted'].includes(String(payload.type))
-		) {
-			current_turn = null;
-		} else if (
-			[
-				'token_count',
-				'user_message',
-				'agent_message',
-				'thread_settings_applied',
-			].includes(String(payload.type))
-		) {
-			result.unindexed_records++;
-		} else {
+					byte_offset,
+				)
+			)
+				unknown_state = true;
+		} else if (turn_endings.includes(String(payload.type))) {
+			thread.end_turn();
+		} else if (!passive_events.includes(String(payload.type))) {
 			unknown_state = true;
-			result.unindexed_records++;
-			continue;
 		}
 	}
-	result.messages = [...messages.values()];
-	result.inactive_turns = turns
-		.filter((t) => !t.active)
-		.map((t) => t.id);
-	const preserved = preserve_records(records, result, 'codex');
+	result.messages = thread.messages();
+	result.inactive_turns = thread.inactive_turns();
+	const preserved = preserve_records(
+		records,
+		result,
+		codex_evidence(result.inactive_turns),
+	);
 	if (approval_reviewer) {
-		for (const part of [
-			...preserved.messages,
-			...(preserved.parts ?? []),
-		]) {
+		for (const part of all_parts(preserved)) {
 			if (part.kind === 'message' && part.role === 'user') {
 				part.kind = 'review_context';
 				part.role = 'context';
@@ -321,10 +225,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			});
 	}
 	if (unknown_state)
-		for (const message of [
-			...preserved.messages,
-			...(preserved.parts ?? []),
-		]) {
+		for (const message of all_parts(preserved)) {
 			message.state = 'unknown';
 			message.active = true;
 		}

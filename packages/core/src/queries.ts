@@ -45,10 +45,30 @@ const provenance_columns = `
 	COALESCE(p.status, 'superseded') AS path_status
 `;
 
+// Session, source and provenance columns that locate a part.
+const located_columns = `
+	r.session_id, s.source_id, s.agent, s.root,
+	s.status AS source_status, s.checked_at AS source_checked_at,
+	r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
+	${provenance_columns}
+`;
+
+// Inactive branches and alternative representations are history.
+const current_filter = `
+	($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+`;
+
+// A user prompt on the branch being read: where a turn starts.
+const turn_prompt = `
+	m.archive_id = $archive_id AND m.active = $active
+	AND m.representation = 'primary'
+	AND m.kind = 'message' AND m.role = 'user'
+`;
+
 const match_filter = `
 	parts_fts MATCH $query
 	AND ${session_filter}
-	AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+	AND ${current_filter}
 	AND ($kind IS NULL OR m.kind = $kind)
 	AND ($after IS NULL OR m.timestamp >= $after)
 	AND ($before IS NULL OR m.timestamp <= $before)
@@ -57,11 +77,7 @@ const match_filter = `
 const search_rows = (filter = '') => `
 	SELECT
 		${message_columns()},
-		r.session_id, s.source_id, s.agent, s.root,
-		s.status AS source_status, s.checked_at AS source_checked_at,
-		r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
-
-		${provenance_columns},
+		${located_columns},
 		substr(snippet(parts_fts, 0, '', '', '…', 32), 1, 4000) AS snippet,
 		max(0, instr(m.content, snippet(parts_fts, 0, '', '', '', 32)) - 1) AS char_offset,
 		bm25(parts_fts) AS relevance
@@ -71,6 +87,16 @@ const search_rows = (filter = '') => `
 	JOIN sources s USING (source_id)
 	${provenance_join}
 	WHERE ${match_filter} ${filter}
+`;
+
+// An excerpt of one original record, with its neighbours in source order.
+const raw_record = (record_key: string) => `
+	SELECT substr(r.raw_json, $offset + 1, $chars) AS content,
+		length(r.raw_json) AS content_length, r.record_key, r.native_type,
+		(SELECT record_key FROM records WHERE archive_id = r.archive_id AND source_order < r.source_order ORDER BY source_order DESC LIMIT 1) AS previous_key,
+		(SELECT record_key FROM records WHERE archive_id = r.archive_id AND source_order > r.source_order ORDER BY source_order LIMIT 1) AS next_key
+	FROM records r
+	WHERE r.archive_id = $archive_id AND r.record_key = ${record_key}
 `;
 
 export const sql = {
@@ -220,7 +246,7 @@ export const sql = {
 		SELECT ${message_columns('1', '400')}
 		FROM parts m
 		WHERE m.archive_id = $archive_id
-			AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+			AND ${current_filter}
 			AND ((m.kind = 'message' AND m.role = 'user') OR m.kind = 'summary')
 		ORDER BY m.source_order, m.native_id
 		LIMIT $limit OFFSET $offset
@@ -229,7 +255,7 @@ export const sql = {
 		SELECT m.kind, count(*) AS count
 		FROM parts m
 		WHERE m.archive_id = $archive_id
-			AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+			AND ${current_filter}
 		GROUP BY m.kind
 		ORDER BY m.kind
 	`,
@@ -237,9 +263,7 @@ export const sql = {
 	turn_start: `
 		SELECT ${message_columns('1', '400')}
 		FROM parts m
-		WHERE m.archive_id = $archive_id AND m.active = $active
-			AND m.representation = 'primary'
-			AND m.kind = 'message' AND m.role = 'user'
+		WHERE ${turn_prompt}
 			AND m.source_order <= $source_order
 		ORDER BY m.source_order DESC, m.native_id
 		LIMIT 1
@@ -247,9 +271,7 @@ export const sql = {
 	turn_end: `
 		SELECT ${message_columns('1', '400')}
 		FROM parts m
-		WHERE m.archive_id = $archive_id AND m.active = $active
-			AND m.representation = 'primary'
-			AND m.kind = 'message' AND m.role = 'user'
+		WHERE ${turn_prompt}
 			AND m.source_order > $source_order
 		ORDER BY m.source_order, m.native_id
 		LIMIT 1
@@ -268,11 +290,7 @@ export const sql = {
 	read_message: `
 		SELECT ${message_columns('$char_offset + 1', '$chars')},
 			length(m.content) AS content_length,
-			r.session_id, s.source_id, s.agent, s.root,
-			s.status AS source_status, s.checked_at AS source_checked_at,
-			r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
-
-			${provenance_columns}
+			${located_columns}
 		FROM parts m
 		JOIN sessions r USING (archive_id)
 		JOIN sources s USING (source_id)
@@ -293,4 +311,63 @@ export const sql = {
 		ORDER BY m.source_order
 		LIMIT 2
 	`,
+	// Positional statements: sync bookkeeping and record storage.
+	cached_unit: `
+		SELECT data FROM sync_cache WHERE source_id=? AND unit_key=? AND signature=?
+	`,
+	session_archive_id: `
+		SELECT archive_id FROM sessions WHERE session_id=? AND source_id=?
+	`,
+	store_cache: `
+		INSERT INTO sync_cache VALUES(?,?,?,?) ON CONFLICT(source_id,unit_key) DO UPDATE SET signature=excluded.signature,data=excluded.data
+	`,
+	checkpoint: `
+		SELECT data FROM sync_cache WHERE source_id=? AND unit_key=?
+	`,
+	record_lines: `
+		SELECT raw_json,source_order FROM records WHERE archive_id=? ORDER BY source_order
+	`,
+	session_version: `
+		SELECT hash,parser_version FROM sessions WHERE archive_id=?
+	`,
+	delete_links: `
+		DELETE FROM links WHERE archive_id=?
+	`,
+	delete_parts: `
+		DELETE FROM parts WHERE archive_id=?
+	`,
+	delete_part: `
+		DELETE FROM parts WHERE archive_id=? AND native_id=?
+	`,
+	delete_records: `
+		DELETE FROM records WHERE archive_id=?
+	`,
+	record_keys: `
+		SELECT record_key FROM records WHERE archive_id=?
+	`,
+	insert_record: `
+		INSERT INTO records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(archive_id,record_key) DO NOTHING
+	`,
+	insert_link: `
+		INSERT OR IGNORE INTO links VALUES(?,?,?,?,?)
+	`,
+	part_ids: `
+		SELECT native_id FROM parts WHERE archive_id=?
+	`,
+	store_input: `
+		INSERT INTO session_inputs VALUES(?,?,?,?,?) ON CONFLICT(archive_id,source_id,path) DO UPDATE SET fingerprint=excluded.fingerprint,byte_offset=excluded.byte_offset
+	`,
+	archive_ids: `
+		SELECT archive_id FROM sessions WHERE substr(archive_id, 1, length(?)) = ? ORDER BY archive_id LIMIT 2
+	`,
+	first_record_key: `
+		SELECT record_key FROM records WHERE archive_id=? ORDER BY source_order LIMIT 1
+	`,
+	record_links: `
+		SELECT kind, namespace, target FROM links WHERE archive_id=? AND record_key=? ORDER BY kind,namespace,target LIMIT 21
+	`,
+	raw_record: raw_record('$native_id'),
+	raw_record_of_part: raw_record(
+		'(SELECT record_key FROM parts WHERE archive_id = $archive_id AND native_id = $native_id)',
+	),
 };

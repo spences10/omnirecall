@@ -1,13 +1,10 @@
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { InputError } from '../../core/src/errors.ts';
 import { digest, max_file_bytes } from '../../core/src/files.ts';
-import {
-	InputError,
-	text,
-	type ImportUnit,
-	type JsonObject,
-} from '../../core/src/types.ts';
+import { text } from '../../core/src/readers.ts';
+import type { ImportUnit, JsonObject } from '../../core/src/types.ts';
 
 export type Snapshot = {
 	session: JsonObject;

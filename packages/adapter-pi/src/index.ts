@@ -1,22 +1,77 @@
-import { preserve_records } from '../../adapter-shared/src/evidence.ts';
+import {
+	obj,
+	preserve_records,
+	readable,
+	str,
+	tool_call_text,
+	type RecordParts,
+} from '../../adapter-shared/src/evidence.ts';
 import {
 	pi_entry_schema,
 	pi_header_schema,
 	pi_message_schema,
 	validate_source,
 } from '../../adapter-shared/src/schemas.ts';
+import { InputError } from '../../core/src/errors.ts';
 import { jsonl_adapter } from '../../core/src/files.ts';
 import {
 	date,
 	dialogue,
-	InputError,
 	metadata,
 	object,
 	text,
-	type Message,
-	type RecordLine,
-	type Transcript,
+} from '../../core/src/readers.ts';
+import type {
+	Message,
+	RecordLine,
+	Transcript,
 } from '../../core/src/types.ts';
+
+/** Tools, thinking, summaries and shell runs beside Pi dialogue. */
+function pi_parts({ value: v, add, link }: RecordParts) {
+	link('parent', 'record', v.parentId);
+	link('first_retained', 'record', v.firstKeptEntryId);
+	link('summary_of', 'record', v.fromId);
+	link('label_target', 'record', v.targetId);
+	link('forked_from', 'locator', v.parentSession);
+	const m = obj(v.message);
+	const role = str(m.role) ?? str(v.type) ?? 'unknown';
+	if (role === 'toolResult') {
+		add(
+			'tool_result',
+			readable(m.content),
+			'/message/content',
+			'tool',
+			str(m.toolCallId) ?? undefined,
+		);
+		link('tool_result_for', 'call', m.toolCallId);
+	} else if (Array.isArray(m.content)) {
+		for (const [i, value] of m.content.entries()) {
+			const b = obj(value),
+				pointer = `/message/content/${i}`;
+			if (b.type === 'thinking')
+				add('reasoning', readable(b), pointer, 'assistant');
+			if (b.type === 'toolCall')
+				add(
+					'tool_call',
+					tool_call_text(b.name, b.arguments),
+					pointer,
+					'assistant',
+					str(b.id) ?? undefined,
+				);
+		}
+	}
+	if (v.type === 'compaction' || v.type === 'branch_summary')
+		add('summary', readable(v.summary), '/summary');
+	if (v.type === 'custom_message')
+		add('message', readable(v.content), '/content', 'custom');
+	if (role === 'bashExecution')
+		add(
+			'operation',
+			[str(m.command), str(m.output)].filter(Boolean).join('\n'),
+			'/message',
+		);
+}
 
 export function parse_pi(records: RecordLine[]): Transcript {
 	const header = records[0]?.value;
@@ -91,22 +146,10 @@ export function parse_pi(records: RecordLine[]): Transcript {
 					result.messages.push(normalized);
 					ancestor = id;
 				}
-			} else result.unindexed_records++;
+			}
 		} else if (entry.type === 'session_info') {
 			result.title = metadata(entry.name);
-		} else if (
-			[
-				'model_change',
-				'thinking_level_change',
-				'compaction',
-				'branch_summary',
-				'custom',
-				'custom_message',
-				'label',
-			].includes(String(entry.type))
-		) {
-			result.unindexed_records++;
-		} else result.unindexed_records++;
+		}
 		nearest_message.set(id, ancestor);
 	}
 	const active_ids = new Set<string>();
@@ -116,7 +159,14 @@ export function parse_pi(records: RecordLine[]): Transcript {
 	}
 	for (const message of result.messages)
 		message.active = active_ids.has(message.native_id);
-	return preserve_records(records, result, 'pi');
+	return preserve_records(records, result, {
+		dialogue_pointer: '/message/content',
+		position: (value) => ({
+			active: active_ids.has(str(value.id) ?? ''),
+			turn_id: null,
+		}),
+		extract: pi_parts,
+	});
 }
 
 export const pi_adapter = jsonl_adapter('pi', parse_pi);

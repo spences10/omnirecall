@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
-import { InputError } from './types.ts';
+import { InputError } from './errors.ts';
 
 export const application_id = 0x4f4d4e49;
 export interface SchemaDefinition {

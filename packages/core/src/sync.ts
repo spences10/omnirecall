@@ -1,12 +1,13 @@
 import { Archive } from './database.ts';
+import { InputError } from './errors.ts';
 import { digest } from './files.ts';
 import { type SyncCache } from './sync-cache.ts';
-import {
-	InputError,
-	type Adapter,
-	type ImportResult,
-	type ImportUnit,
-	type Source,
+import type {
+	Adapter,
+	ImportInput,
+	ImportResult,
+	ImportUnit,
+	Source,
 } from './types.ts';
 import {
 	import_schema,
@@ -34,13 +35,88 @@ export interface SyncProgress {
 	failures: number;
 }
 
-export async function sync(
+/** The previous import of a single-file unit, offered for an append-only read. */
+function resume_input(
 	archive: Archive,
-	sources: Source[],
-	adapters: Adapter[],
-	on_progress?: (progress: SyncProgress) => void,
+	source: Source,
+	adapter: Adapter,
+	unit: ImportUnit,
 ) {
-	const result = {
+	const cached = archive.checkpoint(source, unit.key);
+	if (
+		!cached ||
+		cached.sessions.length !== 1 ||
+		cached.inputs.length !== 1 ||
+		cached.parser_version !== adapter.parser_version
+	)
+		return undefined;
+	return {
+		input: cached.inputs[0]!,
+		records: () =>
+			archive.record_lines(cached.sessions[0]!.archive_id),
+	};
+}
+
+/** Read one unit and check the adapter's output before anything is stored. */
+async function read_unit(
+	archive: Archive,
+	source: Source,
+	adapter: Adapter,
+	titles: Map<string, string>,
+	unit: ImportUnit,
+) {
+	const batch = validate(
+		import_schema,
+		await adapter.read(
+			unit,
+			resume_input(archive, source, adapter, unit),
+		),
+		`Adapter ${adapter.agent} output`,
+	);
+	if (!batch.inputs.length || !batch.sessions.length)
+		throw new InputError(
+			'unsupported',
+			'Import unit contains no supported sessions or inputs',
+		);
+	for (const session of batch.sessions)
+		for (const record of session.records ?? []) {
+			if (batch.inputs.length > 1 && !record.input_path)
+				throw new InputError(
+					'invalid',
+					'Multi-input records require input provenance',
+				);
+			if (
+				record.input_path &&
+				!batch.inputs.some((i) => i.path === record.input_path)
+			)
+				throw new InputError(
+					'invalid',
+					'Record references an unknown input',
+				);
+		}
+	for (const session of batch.sessions)
+		session.title = validate(
+			metadata_schema,
+			titles.get(session.native_id) ?? session.title,
+			`Adapter ${adapter.agent} title`,
+		);
+	return batch;
+}
+
+/** Content identity per session, ignoring which input a record came from. */
+function summaries(batch: ImportResult) {
+	return batch.sessions.map((session) => ({
+		key: session.session_key ?? session.native_id,
+		hash: digest(
+			JSON.stringify(session, (key, value) =>
+				key === 'input_path' ? undefined : value,
+			),
+		),
+	}));
+}
+
+function new_result() {
+	return {
 		status: 'ok',
 		files_scanned: 0,
 		files_indexed: 0,
@@ -63,37 +139,221 @@ export async function sync(
 			count: number;
 		}[],
 	};
-	const issue = (source: Source, path: string, error: unknown) => {
-		const code = error_code(error);
-		const group = result.issue_counts.find(
-			(group) => group.agent === source.agent && group.code === code,
-		);
-		if (group) group.count++;
-		else
-			result.issue_counts.push({
-				agent: source.agent,
-				code,
-				count: 1,
-			});
-		result.failures++;
-		if (error_code(error) === 'error') result.operational_failures++;
-		if (result.issues.length < 100)
-			result.issues.push({
-				source_id: source.source_id,
-				path,
-				code: error_code(error),
-				message:
-					error instanceof Error ? error.message : 'Import failed',
-			});
-		else result.issues_truncated = true;
-	};
+}
+type SyncResult = ReturnType<typeof new_result>;
+type Report = (
+	phase: SyncProgress['phase'],
+	completed?: number,
+	total?: number,
+) => void;
 
+/** Count a failure by agent and code, keeping details for the first 100. */
+function record_issue(
+	result: SyncResult,
+	source: Source,
+	path: string,
+	error: unknown,
+) {
+	const code = error_code(error);
+	const group = result.issue_counts.find(
+		(group) => group.agent === source.agent && group.code === code,
+	);
+	if (group) group.count++;
+	else
+		result.issue_counts.push({
+			agent: source.agent,
+			code,
+			count: 1,
+		});
+	result.failures++;
+	if (code === 'error') result.operational_failures++;
+	if (result.issues.length < 100)
+		result.issues.push({
+			source_id: source.source_id,
+			path,
+			code,
+			message:
+				error instanceof Error ? error.message : 'Import failed',
+		});
+	else result.issues_truncated = true;
+}
+
+function tally(
+	result: SyncResult,
+	inputs: ImportInput[],
+	sessions: { unindexed_records: number }[],
+) {
+	result.files_indexed += inputs.length;
+	result.partial_files += inputs.filter((i) => i.partial).length;
+	result.unindexed_records += sessions.reduce(
+		(n, s) => n + s.unindexed_records,
+		0,
+	);
+}
+
+/** Store a freshly read unit atomically; returns how many sessions changed. */
+function store_unit(
+	archive: Archive,
+	source: Source,
+	adapter: Adapter,
+	unit: ImportUnit,
+	batch: ImportResult,
+	token: string | undefined,
+) {
+	const cache: SyncCache = {
+		sessions: [],
+		inputs: batch.inputs,
+		parser_version: adapter.parser_version,
+	};
+	let added = 0;
+	const batch_summaries = summaries(batch);
+	archive.atomic(() => {
+		for (const [i, session] of batch.sessions.entries()) {
+			const summary = batch_summaries[i]!;
+			// Qualify identity consistently by import unit, including on the first import.
+			session.session_key = JSON.stringify([
+				unit.key,
+				session.session_key ?? session.native_id,
+			]);
+			const stored = archive.store(
+				source,
+				batch.inputs[0]!.path,
+				session,
+				{
+					parser_version: adapter.parser_version,
+					hash: summary.hash,
+					byte_offset: batch.inputs[0]!.byte_offset,
+					partial: batch.inputs.some((i) => i.partial),
+					inputs: batch.inputs,
+					append: batch.append,
+				},
+			);
+			if (stored.added) added++;
+			cache.sessions.push({
+				...summary,
+				native_id: session.native_id,
+				session_id: stored.session_id,
+				archive_id: stored.archive_id,
+				unindexed_records: session.unindexed_records,
+			});
+		}
+		if (token !== undefined)
+			archive.cache(source, unit.key, token, cache);
+	});
+	return added;
+}
+
+/** Discover and import one source root, recording its resulting status. */
+async function sync_source(
+	archive: Archive,
+	source: Source,
+	adapter: Adapter,
+	result: SyncResult,
+	report: Report,
+) {
+	archive.register(source, 'checking');
+	let units: ImportUnit[];
+	try {
+		units = await adapter.discover(source.root);
+	} catch (e) {
+		archive.register(source, error_code(e));
+		record_issue(result, source, source.root, e);
+		report('source_done');
+		return;
+	}
+	const failures = result.failures,
+		partial = result.partial_files;
+	archive.reconcile_paths(
+		source,
+		new Set(units.flatMap((u) => u.locators)),
+	);
+	report('checking', 0, units.length);
+	let titles = new Map<string, string>();
+	try {
+		titles = (await adapter.titles?.(source.root)) ?? titles;
+	} catch (e) {
+		record_issue(result, source, source.root, e);
+	}
+	const read = (unit: ImportUnit) =>
+		read_unit(archive, source, adapter, titles, unit);
+	const title_hash = digest(
+		JSON.stringify(
+			[...titles].sort(([a], [b]) => a.localeCompare(b)),
+		),
+	);
+	const signature = (unit: ImportUnit, fingerprint: string) =>
+		`1:${adapter.parser_version}:${digest(JSON.stringify([unit.locators, title_hash, fingerprint]))}`;
+
+	const refreshed: SyncCache[] = [];
+	for (const [index, unit] of units.entries()) {
+		result.files_scanned += unit.locators.length;
+		report('importing', index, units.length);
+		try {
+			const fingerprint = await adapter.fingerprint?.(unit);
+			const token =
+				fingerprint === undefined
+					? undefined
+					: signature(unit, fingerprint);
+			const cached =
+				token === undefined
+					? undefined
+					: archive.cached(source, unit.key, token);
+			if (cached) {
+				refreshed.push(cached);
+				result.files_skipped += cached.inputs.length;
+				tally(result, cached.inputs, cached.sessions);
+				continue;
+			}
+			const batch = await read(unit);
+			// Without a fingerprint, a second read is the only change detector.
+			const changed =
+				fingerprint === undefined
+					? JSON.stringify(summaries(await read(unit))) !==
+						JSON.stringify(summaries(batch))
+					: (await adapter.fingerprint!(unit)) !== fingerprint;
+			if (changed)
+				throw new InputError(
+					'changed',
+					'Source changed during import; retry sync',
+				);
+			result.sessions_updated += store_unit(
+				archive,
+				source,
+				adapter,
+				unit,
+				batch,
+				token,
+			);
+			tally(result, batch.inputs, batch.sessions);
+		} catch (error) {
+			for (const path of unit.locators)
+				archive.path_status(source, path, error_code(error));
+			record_issue(result, source, unit.key, error);
+		}
+	}
+	archive.atomic(() => {
+		for (const cached of refreshed)
+			archive.refresh_cached(source, cached);
+	});
+	report('source_done', units.length, units.length);
+
+	archive.register(
+		source,
+		result.failures !== failures || result.partial_files !== partial
+			? 'partial'
+			: 'available',
+	);
+}
+
+export async function sync(
+	archive: Archive,
+	sources: Source[],
+	adapters: Adapter[],
+	on_progress?: (progress: SyncProgress) => void,
+) {
+	const result = new_result();
 	for (const [source_index, source] of sources.entries()) {
-		const report = (
-			phase: SyncProgress['phase'],
-			completed = 0,
-			total = 0,
-		) =>
+		const report: Report = (phase, completed = 0, total = 0) =>
 			on_progress?.({
 				phase,
 				agent: source.agent,
@@ -109,210 +369,7 @@ export async function sync(
 		const adapter = adapters.find((a) => a.agent === source.agent);
 		if (!adapter)
 			throw new InputError('unsupported', 'Missing adapter');
-		archive.register(source, 'checking');
-		let units: ImportUnit[];
-		try {
-			units = await adapter.discover(source.root);
-		} catch (e) {
-			archive.register(source, error_code(e));
-			issue(source, source.root, e);
-			report('source_done');
-			continue;
-		}
-		const failures = result.failures,
-			partial = result.partial_files;
-		archive.reconcile_paths(
-			source,
-			new Set(units.flatMap((u) => u.locators)),
-		);
-		report('checking', 0, units.length);
-		let titles = new Map<string, string>();
-		try {
-			titles = (await adapter.titles?.(source.root)) ?? titles;
-		} catch (e) {
-			issue(source, source.root, e);
-		}
-		const read = async (unit: ImportUnit) => {
-			const batch = validate(
-				import_schema,
-				await adapter.read(
-					unit,
-					(() => {
-						const cached = archive.checkpoint(source, unit.key);
-						if (
-							!cached ||
-							cached.sessions.length !== 1 ||
-							cached.inputs.length !== 1 ||
-							cached.parser_version !== adapter.parser_version
-						)
-							return undefined;
-						return {
-							input: cached.inputs[0]!,
-							records: () =>
-								archive.record_lines(cached.sessions[0]!.archive_id),
-						};
-					})(),
-				),
-				`Adapter ${adapter.agent} output`,
-			);
-			if (!batch.inputs.length || !batch.sessions.length)
-				throw new InputError(
-					'unsupported',
-					'Import unit contains no supported sessions or inputs',
-				);
-			for (const session of batch.sessions)
-				for (const record of session.records ?? []) {
-					if (batch.inputs.length > 1 && !record.input_path)
-						throw new InputError(
-							'invalid',
-							'Multi-input records require input provenance',
-						);
-					if (
-						record.input_path &&
-						!batch.inputs.some((i) => i.path === record.input_path)
-					)
-						throw new InputError(
-							'invalid',
-							'Record references an unknown input',
-						);
-				}
-			for (const session of batch.sessions)
-				session.title = validate(
-					metadata_schema,
-					titles.get(session.native_id) ?? session.title,
-					`Adapter ${adapter.agent} title`,
-				);
-			return batch;
-		};
-		const serialized = (value: unknown) =>
-			JSON.stringify(value, (key, value) =>
-				key === 'input_path' ? undefined : value,
-			);
-		const summaries = (batch: ImportResult) =>
-			batch.sessions.map((session) => ({
-				key: session.session_key ?? session.native_id,
-				hash: digest(serialized(session)),
-			}));
-		const title_hash = digest(
-			JSON.stringify(
-				[...titles].sort(([a], [b]) => a.localeCompare(b)),
-			),
-		);
-		const signature = (unit: ImportUnit, fingerprint: string) =>
-			`1:${adapter.parser_version}:${digest(JSON.stringify([unit.locators, title_hash, fingerprint]))}`;
-
-		const refreshed: SyncCache[] = [];
-		for (const [index, unit] of units.entries()) {
-			result.files_scanned += unit.locators.length;
-			report('importing', index, units.length);
-			try {
-				const fingerprint = await adapter.fingerprint?.(unit);
-				const token =
-					fingerprint === undefined
-						? undefined
-						: signature(unit, fingerprint);
-				const cached =
-					token === undefined
-						? undefined
-						: archive.cached(source, unit.key, token);
-				if (cached) {
-					refreshed.push(cached);
-					result.files_skipped += cached.inputs.length;
-					result.files_indexed += cached.inputs.length;
-					result.partial_files += cached.inputs.filter(
-						(i) => i.partial,
-					).length;
-					result.unindexed_records += cached.sessions.reduce(
-						(n, s) => n + s.unindexed_records,
-						0,
-					);
-					continue;
-				}
-				const batch = await read(unit);
-				if (
-					fingerprint === undefined &&
-					JSON.stringify(summaries(await read(unit))) !==
-						JSON.stringify(summaries(batch))
-				)
-					throw new InputError(
-						'changed',
-						'Source changed during import; retry sync',
-					);
-				if (
-					fingerprint !== undefined &&
-					(await adapter.fingerprint!(unit)) !== fingerprint
-				)
-					throw new InputError(
-						'changed',
-						'Source changed during import; retry sync',
-					);
-				const cache: SyncCache = {
-					sessions: [],
-					inputs: batch.inputs,
-					parser_version: adapter.parser_version,
-				};
-				let added = 0;
-				const batch_summaries = summaries(batch);
-				archive.atomic(() => {
-					for (const [i, session] of batch.sessions.entries()) {
-						const summary = batch_summaries[i]!;
-						// Qualify identity consistently by import unit, including on the first import.
-						session.session_key = JSON.stringify([
-							unit.key,
-							session.session_key ?? session.native_id,
-						]);
-						const stored = archive.store(
-							source,
-							batch.inputs[0]!.path,
-							session,
-							{
-								parser_version: adapter.parser_version,
-								hash: summary.hash,
-								byte_offset: batch.inputs[0]!.byte_offset,
-								partial: batch.inputs.some((i) => i.partial),
-								inputs: batch.inputs,
-								append: batch.append,
-							},
-						);
-						if (stored.added) added++;
-						cache.sessions.push({
-							...summary,
-							native_id: session.native_id,
-							session_id: stored.session_id,
-							archive_id: stored.archive_id,
-							unindexed_records: session.unindexed_records,
-						});
-					}
-					if (token !== undefined)
-						archive.cache(source, unit.key, token, cache);
-				});
-				result.sessions_updated += added;
-				result.files_indexed += batch.inputs.length;
-				result.partial_files += batch.inputs.filter(
-					(i) => i.partial,
-				).length;
-				result.unindexed_records += batch.sessions.reduce(
-					(n, s) => n + s.unindexed_records,
-					0,
-				);
-			} catch (error) {
-				for (const path of unit.locators)
-					archive.path_status(source, path, error_code(error));
-				issue(source, unit.key, error);
-			}
-		}
-		archive.atomic(() => {
-			for (const cached of refreshed)
-				archive.refresh_cached(source, cached);
-		});
-		report('source_done', units.length, units.length);
-
-		archive.register(
-			source,
-			result.failures !== failures || result.partial_files !== partial
-				? 'partial'
-				: 'available',
-		);
+		await sync_source(archive, source, adapter, result, report);
 	}
 	result.status =
 		result.operational_failures && !result.files_indexed

@@ -1,16 +1,59 @@
 import { basename } from 'node:path';
-import { preserve_records } from '../../adapter-shared/src/evidence.ts';
+import {
+	obj,
+	preserve_records,
+	readable,
+	str,
+	tool_call_text,
+	type RecordParts,
+} from '../../adapter-shared/src/evidence.ts';
 import {
 	claude_message_schema,
 	validate_source,
 } from '../../adapter-shared/src/schemas.ts';
+import { InputError } from '../../core/src/errors.ts';
 import { jsonl_adapter } from '../../core/src/files.ts';
 import {
-	InputError,
+	all_parts,
+	iso_timestamp,
 	object,
-	type RecordLine,
-	type Transcript,
-} from '../../core/src/types.ts';
+} from '../../core/src/readers.ts';
+import type { RecordLine, Transcript } from '../../core/src/types.ts';
+
+/** Tools, thinking and summaries beside Claude dialogue. */
+function claude_parts({ value: v, add, link }: RecordParts) {
+	link('parent', 'record', v.parentUuid);
+	link('summary_of', 'record', v.leafUuid);
+	const content = obj(v.message).content;
+	if (Array.isArray(content)) {
+		for (const [i, value] of content.entries()) {
+			const b = obj(value),
+				pointer = `/message/content/${i}`;
+			if (b.type === 'thinking')
+				add('reasoning', readable(b), pointer, 'assistant');
+			if (b.type === 'tool_use')
+				add(
+					'tool_call',
+					tool_call_text(b.name, b.input),
+					pointer,
+					'assistant',
+					str(b.id) ?? undefined,
+				);
+			if (b.type === 'tool_result') {
+				add(
+					'tool_result',
+					readable(b.content),
+					pointer,
+					'tool',
+					str(b.tool_use_id) ?? undefined,
+				);
+				link('tool_result_for', 'call', b.tool_use_id);
+			}
+		}
+	}
+	if (v.type === 'summary')
+		add('summary', readable(v.summary), '/summary');
+}
 
 export function parse_claude(
 	records: RecordLine[],
@@ -31,11 +74,9 @@ export function parse_claude(
 		? basename(path, '.jsonl')
 		: null;
 	const stamp = records
-		.map((r) => r.value.timestamp)
-		.find(
-			(t) => typeof t === 'string' && Number.isFinite(Date.parse(t)),
-		);
-	if (typeof stamp !== 'string')
+		.map((r) => iso_timestamp(r.value.timestamp))
+		.find(Boolean);
+	if (!stamp)
 		throw new InputError(
 			'invalid',
 			'Claude transcript has no valid timestamp',
@@ -49,7 +90,7 @@ export function parse_claude(
 				.find((v) => typeof v === 'string') as string) ?? '',
 		title: null,
 		parent_session: subagent ? id : null,
-		timestamp: new Date(stamp).toISOString(),
+		timestamp: stamp,
 		unindexed_records: 0,
 		messages: [],
 	};
@@ -92,11 +133,7 @@ export function parse_claude(
 				typeof v.parentUuid === 'string' ? v.parentUuid : null,
 			role: String(v.type),
 			content,
-			timestamp:
-				typeof v.timestamp === 'string' &&
-				Number.isFinite(Date.parse(v.timestamp))
-					? new Date(v.timestamp).toISOString()
-					: result.timestamp,
+			timestamp: iso_timestamp(v.timestamp) ?? result.timestamp,
 			source_order: byte_offset,
 			active: true,
 			turn_id: null,
@@ -134,7 +171,12 @@ export function parse_claude(
 		message.parent_id = ancestor;
 		for (const id of visited) nearest.set(id, ancestor);
 	}
-	preserve_records(records, result, 'claude');
+	preserve_records(records, result, {
+		dialogue_pointer: '/message/content',
+		extract: claude_parts,
+	});
+	// Branch state is not established for Claude transcripts.
+	for (const part of all_parts(result)) part.state = 'unknown';
 	if (subagent && result.records?.[0])
 		result.links!.push({
 			record_key: result.records[0].key,

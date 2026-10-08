@@ -1,21 +1,10 @@
-import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { isAbsolute, relative } from 'node:path';
 import type { Archive } from '../../../packages/core/src/database.ts';
 import { source_config } from '../../../packages/core/src/files.ts';
 import type { Source } from '../../../packages/core/src/types.ts';
+import { agents, present } from './agents.ts';
 
-async function present(path: string, file = false): Promise<boolean> {
-	try {
-		const info = await stat(path);
-		return file ? info.isFile() : info.isDirectory();
-	} catch (error) {
-		// Let sync report inaccessible locations rather than calling them absent.
-		return !['ENOENT', 'ENOTDIR'].includes(
-			(error as NodeJS.ErrnoException).code ?? '',
-		);
-	}
-}
 function contains(parent: string, child: string) {
 	const path = relative(parent, child);
 	return (
@@ -43,22 +32,11 @@ export async function automatic_sources(
 		offset += 100;
 	}
 	const home = homedir();
-	const codex = process.env.CODEX_HOME || join(home, '.codex');
-	const candidates = [
-		source_config('pi', join(home, '.pi', 'agent', 'sessions')),
-		source_config('claude', join(home, '.claude', 'projects')),
-	];
-	if (
-		(await present(join(codex, 'sessions'))) ||
-		(await present(join(codex, 'archived_sessions')))
-	)
-		candidates.push(source_config('codex', codex));
-	const opencode = join(
-		process.env.XDG_DATA_HOME || join(home, '.local', 'share'),
-		'opencode',
-	);
-	if (await present(join(opencode, 'opencode.db'), true))
-		candidates.push(source_config('opencode', opencode));
+	const candidates: Source[] = [];
+	for (const { agent, default_root } of agents) {
+		const root = await default_root(home);
+		if (root) candidates.push(source_config(agent, root));
+	}
 	for (const candidate of candidates) {
 		if (
 			configured.some(

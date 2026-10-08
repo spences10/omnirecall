@@ -1,3 +1,4 @@
+import { all_parts, iso_timestamp } from '../../core/src/readers.ts';
 import type {
 	JsonObject,
 	Message,
@@ -5,288 +6,136 @@ import type {
 	Transcript,
 } from '../../core/src/types.ts';
 
-const obj = (value: unknown): JsonObject =>
+// Lenient readers: evidence is kept even where dialogue parsing is strict.
+export const obj = (value: unknown): JsonObject =>
 	value && typeof value === 'object' && !Array.isArray(value)
 		? (value as JsonObject)
 		: {};
-const str = (value: unknown) =>
+export const str = (value: unknown) =>
 	typeof value === 'string' ? value : null;
-function readable(value: unknown): string {
+export function readable(value: unknown): string {
 	if (typeof value === 'string') return value;
 	if (Array.isArray(value))
 		return value.map(readable).filter(Boolean).join('\n');
 	const block = obj(value);
 	return str(block.text) ?? str(block.thinking) ?? '';
 }
+export function tool_call_text(name: unknown, input: unknown) {
+	return `${str(name) ?? ''}\n${typeof input === 'string' ? input : JSON.stringify(input ?? null)}`;
+}
+
+/** One original record, and how to attach searchable parts and links to it. */
+export interface RecordParts {
+	value: JsonObject;
+	/** The dialogue message the adapter already took from this record. */
+	original: Message | undefined;
+	/** Blank content adds nothing. `call` pairs tool calls with their results. */
+	add: (
+		kind: string,
+		content: string,
+		pointer: string,
+		role?: string,
+		call?: string,
+	) => Message | undefined;
+	/** Non-string targets add nothing. */
+	link: (kind: string, namespace: string, target: unknown) => void;
+}
+
+export interface EvidenceFormat {
+	/** JSON pointer to dialogue content within a record. */
+	dialogue_pointer: string;
+	/** Called once per record, in source order. Defaults to active, no turn. */
+	position?(value: JsonObject): {
+		active: boolean;
+		turn_id: string | null;
+	};
+	extract(record: RecordParts): void;
+}
+
+/** Count the records that produced no searchable message or part. */
+export function tally_unindexed(transcript: Transcript) {
+	const indexed = new Set(
+		all_parts(transcript).map((part) => part.record_key),
+	);
+	transcript.unindexed_records = (transcript.records ?? []).filter(
+		(record) => !indexed.has(record.key),
+	).length;
+}
 
 /** Preserve envelopes independently of the searchable interpretation. */
 export function preserve_records(
 	lines: RecordLine[],
 	transcript: Transcript,
-	agent: string,
+	format: EvidenceFormat,
 ): Transcript {
-	transcript.records = lines.map(
-		({ value, byte_offset, raw_json }) => ({
-			key: String(byte_offset),
-			native_id: str(value.id) ?? str(value.uuid),
-			native_type: str(value.type),
-			timestamp:
-				typeof value.timestamp === 'string' &&
-				Number.isFinite(Date.parse(value.timestamp))
-					? new Date(value.timestamp).toISOString()
-					: null,
-			source_order: byte_offset,
-			raw_json: raw_json ?? JSON.stringify(value),
-		}),
-	);
-	transcript.parts = [];
-	transcript.links = [];
+	const records = lines.map(({ value, byte_offset, raw_json }) => ({
+		key: String(byte_offset),
+		native_id: str(value.id) ?? str(value.uuid),
+		native_type: str(value.type),
+		timestamp: iso_timestamp(value.timestamp),
+		source_order: byte_offset,
+		raw_json: raw_json ?? JSON.stringify(value),
+	}));
+	const parts: Message[] = [];
+	const links: NonNullable<Transcript['links']> = [];
+	transcript.records = records;
+	transcript.parts = parts;
+	transcript.links = links;
 	const calls = new Map<string, Message[]>();
 	const results: { part: Message; call: string }[] = [];
 	const dialogue_by_order = new Map(
 		transcript.messages.map((m) => [m.source_order, m]),
 	);
-	let turn: string | null = null;
-	const inactive_turns = new Set(transcript.inactive_turns ?? []);
-	const pi_parents = new Map(
-		lines.map((l) => [str(l.value.id), str(l.value.parentId)]),
-	);
-	const pi_active = new Set<string>();
-	let leaf = str(lines.at(-1)?.value.id);
-	while (leaf && !pi_active.has(leaf)) {
-		pi_active.add(leaf);
-		leaf = pi_parents.get(leaf) ?? null;
-	}
 	for (const [index, line] of lines.entries()) {
-		const v = line.value,
-			p = obj(v.payload),
-			key = String(line.byte_offset);
-		if (str(p.turn_id)) turn = str(p.turn_id);
+		const key = String(line.byte_offset);
+		const { active, turn_id } = format.position?.(line.value) ?? {
+			active: true,
+			turn_id: null,
+		};
 		const original = dialogue_by_order.get(line.byte_offset);
 		if (original) {
 			original.kind = 'message';
 			original.record_key = key;
-			original.json_pointer =
-				agent === 'codex'
-					? '/payload/item/content'
-					: '/message/content';
+			original.json_pointer = format.dialogue_pointer;
 		}
-		const timestamp = transcript.records[index]!.timestamp;
-		const active =
-			agent === 'pi'
-				? pi_active.has(str(v.id) ?? '')
-				: !(turn && inactive_turns.has(turn));
-		const add = (
-			kind: string,
-			content: string,
-			pointer: string,
-			role = kind,
-			call?: string,
-		) => {
-			if (!content.trim()) return;
-			const part: Message = {
-				native_id: `part:${key}:${pointer}`,
-				parent_id: original?.native_id ?? null,
-				role,
-				kind,
-				content,
-				timestamp,
-				source_order: line.byte_offset,
-				active,
-				turn_id: agent === 'codex' ? turn : null,
-				record_key: key,
-				json_pointer: pointer,
-			};
-			transcript.parts!.push(part);
-			if (call && kind === 'tool_call')
-				calls.set(call, [...(calls.get(call) ?? []), part]);
-			if (call && kind === 'tool_result')
-				results.push({ part, call });
-			return part;
-		};
-		const link = (
-			kind: string,
-			namespace: string,
-			target: unknown,
-		) => {
-			if (typeof target === 'string')
-				transcript.links!.push({
-					record_key: key,
+		const timestamp = records[index]!.timestamp;
+		format.extract({
+			value: line.value,
+			original,
+			add(kind, content, pointer, role = kind, call) {
+				if (!content.trim()) return;
+				const part: Message = {
+					native_id: `part:${key}:${pointer}`,
+					parent_id: original?.native_id ?? null,
+					role,
 					kind,
-					namespace,
-					target,
-				});
-		};
-		link('parent', 'record', v.parentId ?? v.parentUuid);
-		link('first_retained', 'record', v.firstKeptEntryId);
-		link('summary_of', 'record', v.fromId ?? v.leafUuid);
-		link('label_target', 'record', v.targetId);
-		link('forked_from', 'locator', v.parentSession);
-		link('forked_from', 'session', p.forked_from_id);
-		const spawn = obj(obj(obj(p.source).subagent).thread_spawn);
-		link('child_session', 'session', spawn.parent_thread_id);
-		if (agent === 'pi' || agent === 'claude') {
-			const m = obj(v.message);
-			const role = str(m.role) ?? str(v.type) ?? 'unknown';
-			if (role === 'toolResult') {
-				add(
-					'tool_result',
-					readable(m.content),
-					'/message/content',
-					'tool',
-					str(m.toolCallId) ?? undefined,
-				);
-				link('tool_result_for', 'call', m.toolCallId);
-			} else if (Array.isArray(m.content)) {
-				for (const [i, value] of m.content.entries()) {
-					const b = obj(value),
-						pointer = `/message/content/${i}`;
-					if (b.type === 'thinking')
-						add('reasoning', readable(b), pointer, 'assistant');
-					if (b.type === 'toolCall' || b.type === 'tool_use') {
-						const input = b.arguments ?? b.input;
-						add(
-							'tool_call',
-							`${str(b.name) ?? ''}\n${typeof input === 'string' ? input : JSON.stringify(input ?? null)}`,
-							pointer,
-							'assistant',
-							str(b.id) ?? undefined,
-						);
-					}
-					if (b.type === 'tool_result') {
-						add(
-							'tool_result',
-							readable(b.content),
-							pointer,
-							'tool',
-							str(b.tool_use_id) ?? undefined,
-						);
-						link('tool_result_for', 'call', b.tool_use_id);
-					}
-				}
-			}
-			if (
-				v.type === 'compaction' ||
-				v.type === 'branch_summary' ||
-				v.type === 'summary'
-			)
-				add('summary', readable(v.summary), '/summary');
-			if (v.type === 'custom_message')
-				add('message', readable(v.content), '/content', 'custom');
-			if (role === 'bashExecution')
-				add(
-					'operation',
-					[str(m.command), str(m.output)].filter(Boolean).join('\n'),
-					'/message',
-				);
-		} else {
-			if (
-				v.type === 'realtime_item' &&
-				p.type === 'transcript_segment'
-			) {
-				const segment = add(
-					'message',
-					str(p.text) ?? '',
-					'/payload/text',
-					str(p.role) ?? 'unknown',
-				);
-				if (segment) {
-					// Realtime segments are evidence, not an inferred continuation of the last coding turn.
-					segment.turn_id = null;
-					segment.parent_id = null;
-					segment.state = 'unknown';
-					segment.active = true;
-				}
-			}
-			if (v.type === 'response_item') {
-				if (
-					p.type === 'function_call' ||
-					p.type === 'custom_tool_call'
-				) {
-					const input = p.arguments ?? p.input;
-					add(
-						'tool_call',
-						`${str(p.name) ?? ''}\n${typeof input === 'string' ? input : JSON.stringify(input ?? null)}`,
-						'/payload',
-						'assistant',
-						str(p.call_id) ?? undefined,
-					);
-				}
-				if (
-					p.type === 'function_call_output' ||
-					p.type === 'custom_tool_call_output'
-				) {
-					add(
-						'tool_result',
-						typeof p.output === 'string'
-							? p.output
-							: JSON.stringify(p.output ?? null),
-						'/payload/output',
-						'tool',
-						str(p.call_id) ?? undefined,
-					);
-					link('tool_result_for', 'call', p.call_id);
-				}
-			}
-			if (p.type === 'item_completed') {
-				const item = obj(p.item);
-				if (
-					['UserMessage', 'AgentMessage'].includes(
-						String(item.type),
-					) &&
-					!original
-				) {
-					const prior = add(
-						'message',
-						readable(item.content),
-						'/payload/item/content',
-						item.type === 'UserMessage' ? 'user' : 'assistant',
-					);
-					if (prior) prior.representation = 'superseded';
-				}
-				if (item.type === 'Reasoning')
-					add(
-						'reasoning',
-						readable(item.summary_text),
-						'/payload/item/summary_text',
-						'assistant',
-					);
-				if (
-					![
-						'UserMessage',
-						'AgentMessage',
-						'Reasoning',
-						'ContextCompaction',
-					].includes(String(item.type))
-				) {
-					add('operation', JSON.stringify(item), '/payload/item');
-					link(
-						'child_session',
-						'session',
-						item.new_thread_id ?? item.newThreadId,
-					);
-				}
-			}
-			if (v.type === 'compacted')
-				add('summary', readable(p.message), '/payload/message');
-		}
+					content,
+					timestamp,
+					source_order: line.byte_offset,
+					active,
+					turn_id,
+					record_key: key,
+					json_pointer: pointer,
+				};
+				parts.push(part);
+				if (call && kind === 'tool_call')
+					calls.set(call, [...(calls.get(call) ?? []), part]);
+				if (call && kind === 'tool_result')
+					results.push({ part, call });
+				return part;
+			},
+			link(kind, namespace, target) {
+				if (typeof target === 'string')
+					links.push({ record_key: key, kind, namespace, target });
+			},
+		});
 	}
-	if (agent === 'claude')
-		for (const part of [...transcript.messages, ...transcript.parts])
-			part.state = 'unknown';
 	// A native call ID can be ambiguous; never pick a call by proximity alone.
 	for (const { part, call } of results) {
 		const candidates = calls.get(call) ?? [];
 		if (candidates.length === 1)
 			part.parent_id = candidates[0]!.native_id;
 	}
-	const indexed = new Set(
-		[...transcript.messages, ...transcript.parts!].map(
-			(p) => p.record_key,
-		),
-	);
-	transcript.unindexed_records = transcript.records.filter(
-		(r) => !indexed.has(r.key),
-	).length;
+	tally_unindexed(transcript);
 	return transcript;
 }
