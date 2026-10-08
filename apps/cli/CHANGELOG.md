@@ -1,5 +1,14 @@
 # omnirecall
 
+## 0.0.7
+
+### Patch Changes
+
+- 522a03a: List and sync source roots in one consistent agent order:
+  Pi, Codex, Claude, then OpenCode.
+- a4e38c8: Report malformed OpenCode rows with the same field-path
+  error messages as the other session adapters.
+
 ## 0.0.6
 
 ### Patch Changes

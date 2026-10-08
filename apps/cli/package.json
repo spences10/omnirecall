@@ -1,6 +1,6 @@
 {
 	"name": "omnirecall",
-	"version": "0.0.6",
+	"version": "0.0.7",
 	"description": "Recall coding-agent session evidence from a durable local archive",
 	"keywords": [
 		"cli",
