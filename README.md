@@ -12,7 +12,7 @@ histories in one local archive. Recover a decision, find a command
 that worked, or give your current assistant the context it needs to
 continue earlier work.
 
-![Example coding assistant conversation using OmniRecall to recover a fix from a previous Pi session](./assets/omnirecall-package-preview.png)
+![omnirecall: search your past Pi, Codex, Claude Code and OpenCode sessions](./assets/omnirecall-package-preview.png)
 
 - Search across agents without remembering which one you used.
 - Read the conversation around a match and inspect original tool
