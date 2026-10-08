@@ -5,6 +5,7 @@ import type {
 	LocatedMessage,
 	MessageContext,
 	SearchMatch,
+	SessionMatch,
 	SessionRecord,
 } from './database.ts';
 import { InputError } from './types.ts';
@@ -204,6 +205,23 @@ export function compact_search(matches: SearchMatch[]) {
 	return matches.map((match) => ({
 		...attribution(match),
 		char_offset: match.char_offset,
+		snippet: Array.from(match.snippet).slice(0, 600).join(''),
+		snippet_truncated: Array.from(match.snippet).length > 600,
+	}));
+}
+
+// Session discovery rows stay small: no paths, statuses or message state.
+export function compact_session_matches(matches: SessionMatch[]) {
+	return matches.map((match) => ({
+		short_id: match.short_id,
+		hits: match.hits,
+		last_hit: match.last_hit,
+		agent: match.agent,
+		title: match.title?.slice(0, 200) ?? null,
+		title_truncated: (match.title?.length ?? 0) > 200,
+		project: match.project.slice(0, 200),
+		project_truncated: match.project.length > 200,
+		ref: message_ref(match),
 		snippet: Array.from(match.snippet).slice(0, 600).join(''),
 		snippet_truncated: Array.from(match.snippet).length > 600,
 	}));

@@ -14,6 +14,7 @@ import { bounded_json } from '../../../packages/core/src/output.ts';
 import {
 	compact_recall,
 	compact_search,
+	compact_session_matches,
 	compact_sessions,
 	excerpt_chars,
 	focused_read,
@@ -118,7 +119,7 @@ const descriptions: Record<string, string> = {
 		'Inspect archive coverage and last sync times; retrieval never syncs automatically',
 	sync: 'Import session evidence; inspect partial status and issue_counts before retrieval',
 	search:
-		'Search conversation messages; use --kind for tool evidence, then read a result ref',
+		'Search conversation messages; --by-session lists matching sessions first; then read a result ref',
 	recall:
 		'Search with bounded context; compact by default, --full for detailed rows',
 	sessions:
@@ -161,6 +162,7 @@ const command_options: Record<string, string[]> = {
 		'offset',
 		'full',
 		'compact',
+		'by-session',
 		'context',
 	],
 	recall: [
@@ -206,6 +208,11 @@ function command(name: string) {
 		full: {
 			type: 'boolean',
 			description: 'Search/recall: return detailed schema v1 output',
+		},
+		'by-session': {
+			type: 'boolean',
+			description:
+				'Search: one row per matching session with hit count and best snippet; narrow with --session <short_id>',
 		},
 		compact: {
 			type: 'boolean',
@@ -358,6 +365,11 @@ function command(name: string) {
 					throw new InputError(
 						'arguments',
 						'--full applies to search/recall; --compact applies to search/recall/sessions; choose one',
+					);
+				if (args['by-session'] && (name !== 'search' || args.full))
+					throw new InputError(
+						'arguments',
+						'--by-session applies to compact search only',
 					);
 				if (
 					name !== 'read' &&
@@ -649,6 +661,10 @@ function command(name: string) {
 								rows = response.results;
 								shared = { messages: response.messages };
 							} else rows = matches;
+						} else if (args['by-session']) {
+							rows = compact_session_matches(
+								archive.search_sessions(query!, options),
+							);
 						} else {
 							const matches = archive.search(query!, options);
 							rows = compact ? compact_search(matches) : matches;

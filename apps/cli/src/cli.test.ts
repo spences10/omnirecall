@@ -888,6 +888,120 @@ describe('built CLI', () => {
 	});
 });
 
+test('search --by-session lists each matching session once with hit counts and a readable best hit', () => {
+	const root = mkdtempSync(join(tmpdir(), 'omnirecall-grouped-'));
+	const db = join(root, 'archive.db');
+	const pi_root = join(root, 'pi');
+	function run(args: string[]) {
+		const result = run_cli([...args, '--db', db, '--json']);
+		return { status: result.status, data: JSON.parse(result.stdout) };
+	}
+	try {
+		mkdirSync(pi_root);
+		writeFileSync(
+			join(pi_root, 'busy.jsonl'),
+			jsonl([
+				...pi_records('busy', '/synthetic/busy'),
+				pi_entry('b1', 'u2', 'assistant', 'groupneedle first'),
+				pi_entry('b2', 'b1', 'user', 'groupneedle second'),
+				pi_entry('b3', 'b2', 'assistant', 'groupneedle third'),
+			]),
+		);
+		writeFileSync(
+			join(pi_root, 'quiet.jsonl'),
+			jsonl([
+				...pi_records('quiet', '/synthetic/quiet'),
+				pi_entry('q1', 'u2', 'assistant', 'groupneedle only'),
+			]),
+		);
+		expect(run(['sync', '--pi-root', pi_root]).status).toBe(0);
+		expect(run(['search', 'groupneedle']).data.results).toHaveLength(
+			4,
+		);
+		const grouped = run(['search', 'groupneedle', '--by-session']);
+		expect(grouped.status).toBe(0);
+		expect(grouped.data).toMatchObject({
+			schema_version: 3,
+			format: 'compact',
+			returned_count: 2,
+			has_more: false,
+		});
+		const rows = grouped.data.results.map(
+			(row: Record<string, unknown>) => ({
+				...grouped.data.shared?.results,
+				...row,
+			}),
+		);
+		expect(
+			rows
+				.map((row: { project: string; hits: number }) => [
+					row.project,
+					row.hits,
+				])
+				.sort(),
+		).toEqual([
+			['/synthetic/busy', 3],
+			['/synthetic/quiet', 1],
+		]);
+		for (const row of rows) {
+			expect(row.title).toBe('Pi migration plan');
+			expect(row.snippet).toContain('groupneedle');
+			expect(row).not.toHaveProperty('source_path');
+			expect(run(['read', row.ref]).data.messages).toContainEqual(
+				expect.objectContaining({
+					content: expect.stringContaining('groupneedle'),
+				}),
+			);
+			expect(
+				run(['search', 'groupneedle', '--session', row.short_id]).data
+					.results,
+			).toHaveLength(row.hits);
+		}
+		const page = run([
+			'search',
+			'groupneedle',
+			'--by-session',
+			'--limit',
+			'1',
+		]).data;
+		expect(page).toMatchObject({
+			returned_count: 1,
+			has_more: true,
+			next_offset: 1,
+		});
+		const next = run([
+			'search',
+			'groupneedle',
+			'--by-session',
+			'--limit',
+			'1',
+			'--offset',
+			'1',
+		]).data;
+		expect(next.results[0].short_id).not.toBe(
+			page.results[0].short_id,
+		);
+		expect(
+			run(['search', 'groupneedle', '--by-session', '--kind', 'all'])
+				.data.results,
+		).toHaveLength(2);
+		expect(
+			run(['search', 'absentneedle', '--by-session']).data.status,
+		).toBe('empty');
+		for (const args of [
+			['search', 'groupneedle', '--by-session', '--full'],
+			['recall', 'groupneedle', '--by-session'],
+			['sessions', '--by-session'],
+		]) {
+			const invalid = run(args);
+			expect(invalid.status).toBe(1);
+			expect(invalid.data.code).toBe('arguments');
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test('build ships the SQL schema unchanged beside the executable', () => {
 	expect(
 		readFileSync(

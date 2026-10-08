@@ -153,6 +153,12 @@ unreferenced messages are removed. Continuation offsets/counts
 describe the rows actually returned. If no result fits,
 `output_budget_exceeded` remains explicit.
 
+`search --by-session` returns one row per matching session, ordered by
+its best hit: `short_id`, `hits`, `last_hit`, agent, title, project
+and the best hit's `ref` and snippet. It omits source paths, statuses
+and message state to stay small; follow up with
+`search --session <short_id>` or read the `ref`.
+
 Search results include `source_path` alongside snippets. Compact
 recall results carry provenance, match offsets and context references;
 role, kind, timestamp, state and content live only in `messages`,

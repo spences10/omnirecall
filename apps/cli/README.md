@@ -64,6 +64,14 @@ pnpx omnirecall sessions --title "migration" --after 2026-09-25 --before 2026-09
 pnpx omnirecall search "sqlite" --session '<short_id>'
 ```
 
+When you don't know which session it was, list matching sessions
+first. Each appears once with its hit count and best snippet:
+
+```bash
+pnpx omnirecall search "sqlite" --by-session
+pnpx omnirecall search "sqlite" --session '<short_id>'
+```
+
 `--title` matches a literal substring (ASCII case-insensitive) on
 `sessions`, `search`, and `recall`. Session date filters use the
 stored session timestamp; search/recall date filters use message

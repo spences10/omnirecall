@@ -81,6 +81,11 @@ export type SearchMatch = LocatedMessage & {
 	char_offset: number;
 	relevance: number;
 };
+export type SessionMatch = SearchMatch & {
+	short_id: string;
+	hits: number;
+	last_hit: string | null;
+};
 export type MessageContext = {
 	before: ArchivedMessage[];
 	after: ArchivedMessage[];
@@ -513,13 +518,55 @@ export class Archive {
 	}
 
 	search(query: string, options: SearchOptions): SearchMatch[] {
+		return this.#match(query, options, (parameters) =>
+			this.#statement(sql.search).all(parameters),
+		) as SearchMatch[];
+	}
+
+	/** Matching sessions, each with its best hit and hit count. */
+	search_sessions(
+		query: string,
+		options: SearchOptions,
+	): SessionMatch[] {
+		return this.#match(query, options, (parameters) =>
+			(
+				this.#statement(sql.search_sessions).all(parameters) as {
+					part: number;
+					hits: number;
+					last_hit: string | null;
+				}[]
+			).map(({ part, hits, last_hit }) => {
+				const {
+					limit: _limit,
+					offset: _offset,
+					...filters
+				} = parameters;
+				const hit = this.#statement(sql.search_hit).get({
+					...filters,
+					part,
+				}) as SearchMatch;
+				return {
+					...hit,
+					short_id: this.#short_session_id(hit.archive_id),
+					hits,
+					last_hit,
+				};
+			}),
+		);
+	}
+
+	#match<T>(
+		query: string,
+		options: SearchOptions,
+		run: (parameters: Record<string, string | number | null>) => T,
+	): T {
 		const expression = search_expression(query);
 		try {
-			return this.#statement(sql.search).all({
+			return run({
 				...this.#session_parameters(options),
 				query: expression,
 				kind: options.kind ?? null,
-			}) as SearchMatch[];
+			});
 		} catch (error) {
 			if (
 				error instanceof Error &&

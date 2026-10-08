@@ -45,6 +45,34 @@ const provenance_columns = `
 	COALESCE(p.status, 'superseded') AS path_status
 `;
 
+const match_filter = `
+	parts_fts MATCH $query
+	AND ${session_filter}
+	AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
+	AND ($kind IS NULL OR m.kind = $kind)
+	AND ($after IS NULL OR m.timestamp >= $after)
+	AND ($before IS NULL OR m.timestamp <= $before)
+`;
+
+const search_rows = (filter = '') => `
+	SELECT
+		${message_columns()},
+		r.session_id, s.source_id, s.agent, s.root,
+		s.status AS source_status, s.checked_at AS source_checked_at,
+		r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
+
+		${provenance_columns},
+		substr(snippet(parts_fts, 0, '', '', '…', 32), 1, 4000) AS snippet,
+		max(0, instr(m.content, snippet(parts_fts, 0, '', '', '', 32)) - 1) AS char_offset,
+		bm25(parts_fts) AS relevance
+	FROM parts_fts
+	JOIN parts m ON m.rowid = parts_fts.rowid
+	JOIN sessions r USING (archive_id)
+	JOIN sources s USING (source_id)
+	${provenance_join}
+	WHERE ${match_filter} ${filter}
+`;
+
 export const sql = {
 	get_source: `
 		SELECT source_id, agent, root, status, checked_at
@@ -153,31 +181,40 @@ export const sql = {
 		LIMIT $limit OFFSET $offset
 	`,
 	search: `
-		SELECT
-			${message_columns()},
-			r.session_id, s.source_id, s.agent, s.root,
-			s.status AS source_status, s.checked_at AS source_checked_at,
-			r.project, r.title, r.parent_session, r.indexed_at, r.unindexed_records,
-
-			${provenance_columns},
-			substr(snippet(parts_fts, 0, '', '', '…', 32), 1, 4000) AS snippet,
-			max(0, instr(m.content, snippet(parts_fts, 0, '', '', '', 32)) - 1) AS char_offset,
-			bm25(parts_fts) AS relevance
-		FROM parts_fts
-		JOIN parts m ON m.rowid = parts_fts.rowid
-		JOIN sessions r USING (archive_id)
-		JOIN sources s USING (source_id)
-		${provenance_join}
-		WHERE parts_fts MATCH $query
-			AND ${session_filter}
-			AND ($include_history = 1 OR (m.active = 1 AND m.representation = 'primary'))
-			AND ($kind IS NULL OR m.kind = $kind)
-			AND ($after IS NULL OR m.timestamp >= $after)
-			AND ($before IS NULL OR m.timestamp <= $before)
+		${search_rows()}
 		ORDER BY relevance, m.timestamp DESC, r.session_id,
 			r.archive_id, m.source_order, m.native_id
 		LIMIT $limit OFFSET $offset
 	`,
+	// One row per matching session: its best hit, hit count and latest hit.
+	search_sessions: `
+		WITH hits AS MATERIALIZED (
+			SELECT m.rowid AS part, m.archive_id, m.timestamp,
+				bm25(parts_fts) AS relevance
+			FROM parts_fts
+			JOIN parts m ON m.rowid = parts_fts.rowid
+			JOIN sessions r USING (archive_id)
+			JOIN sources s USING (source_id)
+			WHERE ${match_filter}
+		), ranked AS (
+			SELECT part, archive_id, relevance,
+				count(*) OVER session AS hits,
+				max(timestamp) OVER session AS last_hit,
+				row_number() OVER (
+					PARTITION BY archive_id
+					ORDER BY relevance, timestamp DESC, part
+				) AS position
+			FROM hits
+			WINDOW session AS (PARTITION BY archive_id)
+		)
+		SELECT part, hits, last_hit
+		FROM ranked
+		WHERE position = 1
+		ORDER BY relevance, last_hit DESC, archive_id
+		LIMIT $limit OFFSET $offset
+	`,
+	// Filter on parts: FTS5 ignores a rowid constraint combined with MATCH.
+	search_hit: search_rows('AND m.rowid = $part'),
 	read_message: `
 		SELECT ${message_columns('$char_offset + 1', '$chars')},
 			length(m.content) AS content_length,
