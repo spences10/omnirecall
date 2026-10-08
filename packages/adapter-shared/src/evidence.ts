@@ -1,5 +1,6 @@
 import {
 	all_parts,
+	iso_timestamp,
 	type JsonObject,
 	type Message,
 	type RecordLine,
@@ -72,11 +73,7 @@ export function preserve_records(
 		key: String(byte_offset),
 		native_id: str(value.id) ?? str(value.uuid),
 		native_type: str(value.type),
-		timestamp:
-			typeof value.timestamp === 'string' &&
-			Number.isFinite(Date.parse(value.timestamp))
-				? new Date(value.timestamp).toISOString()
-				: null,
+		timestamp: iso_timestamp(value.timestamp),
 		source_order: byte_offset,
 		raw_json: raw_json ?? JSON.stringify(value),
 	}));

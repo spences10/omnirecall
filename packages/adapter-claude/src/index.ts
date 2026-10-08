@@ -15,6 +15,7 @@ import { jsonl_adapter } from '../../core/src/files.ts';
 import {
 	all_parts,
 	InputError,
+	iso_timestamp,
 	object,
 	type RecordLine,
 	type Transcript,
@@ -74,11 +75,9 @@ export function parse_claude(
 		? basename(path, '.jsonl')
 		: null;
 	const stamp = records
-		.map((r) => r.value.timestamp)
-		.find(
-			(t) => typeof t === 'string' && Number.isFinite(Date.parse(t)),
-		);
-	if (typeof stamp !== 'string')
+		.map((r) => iso_timestamp(r.value.timestamp))
+		.find(Boolean);
+	if (!stamp)
 		throw new InputError(
 			'invalid',
 			'Claude transcript has no valid timestamp',
@@ -92,7 +91,7 @@ export function parse_claude(
 				.find((v) => typeof v === 'string') as string) ?? '',
 		title: null,
 		parent_session: subagent ? id : null,
-		timestamp: new Date(stamp).toISOString(),
+		timestamp: stamp,
 		unindexed_records: 0,
 		messages: [],
 	};
@@ -135,11 +134,7 @@ export function parse_claude(
 				typeof v.parentUuid === 'string' ? v.parentUuid : null,
 			role: String(v.type),
 			content,
-			timestamp:
-				typeof v.timestamp === 'string' &&
-				Number.isFinite(Date.parse(v.timestamp))
-					? new Date(v.timestamp).toISOString()
-					: result.timestamp,
+			timestamp: iso_timestamp(v.timestamp) ?? result.timestamp,
 			source_order: byte_offset,
 			active: true,
 			turn_id: null,

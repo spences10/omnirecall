@@ -11,7 +11,9 @@ import {
 	all_parts,
 	InputError,
 	type Agent,
+	type ImportInput,
 	type Message,
+	type RecordLine,
 	type Source,
 	type Transcript,
 } from './types.ts';
@@ -202,17 +204,20 @@ export class Archive {
 		key: string,
 		signature: string,
 	): SyncCache | undefined {
-		const row = this.#statement(
-			'SELECT data FROM sync_cache WHERE source_id=? AND unit_key=? AND signature=?',
-		).get(source.source_id, key, signature);
+		const row = this.#statement(sql.cached_unit).get(
+			source.source_id,
+			key,
+			signature,
+		);
 		if (!row) return;
 		const cache = parse_cache(String(row.data));
 		if (!cache || !cache.sessions.length || !cache.inputs.length)
 			return;
 		for (const session of cache.sessions) {
-			const current = this.#statement(
-				'SELECT archive_id FROM sessions WHERE session_id=? AND source_id=?',
-			).get(session.session_id, source.source_id);
+			const current = this.#statement(sql.session_archive_id).get(
+				session.session_id,
+				source.source_id,
+			);
 			if (current?.archive_id !== session.archive_id) return;
 		}
 		return cache;
@@ -223,9 +228,12 @@ export class Archive {
 		signature: string,
 		data: SyncCache,
 	) {
-		this.#statement(
-			'INSERT INTO sync_cache VALUES(?,?,?,?) ON CONFLICT(source_id,unit_key) DO UPDATE SET signature=excluded.signature,data=excluded.data',
-		).run(source.source_id, key, signature, JSON.stringify(data));
+		this.#statement(sql.store_cache).run(
+			source.source_id,
+			key,
+			signature,
+			JSON.stringify(data),
+		);
 	}
 	refresh_cached(source: Source, cache: SyncCache) {
 		for (const input of cache.inputs)
@@ -237,17 +245,14 @@ export class Archive {
 	}
 
 	checkpoint(source: Source, key: string): SyncCache | undefined {
-		const row = this.#statement(
-			'SELECT data FROM sync_cache WHERE source_id=? AND unit_key=?',
-		).get(source.source_id, key);
+		const row = this.#statement(sql.checkpoint).get(
+			source.source_id,
+			key,
+		);
 		return row ? parse_cache(String(row.data)) : undefined;
 	}
-	record_lines(
-		archive_id: string,
-	): import('./types.ts').RecordLine[] {
-		return this.#statement(
-			'SELECT raw_json,source_order FROM records WHERE archive_id=? ORDER BY source_order',
-		)
+	record_lines(archive_id: string): RecordLine[] {
+		return this.#statement(sql.record_lines)
 			.all(archive_id)
 			.map((row) => ({
 				value: JSON.parse(String(row.raw_json)),
@@ -265,19 +270,18 @@ export class Archive {
 			byte_offset: number;
 			partial: boolean;
 			parser_version?: number;
-			inputs?: import('./types.ts').ImportInput[];
+			inputs?: ImportInput[];
 			append?: boolean;
 		},
-		_refresh_title = false,
 	) {
 		const version = snapshot.parser_version ?? parser_version;
 		const session_id = `${source.source_id}:${encodeURIComponent(transcript.session_key ?? transcript.native_id)}`;
 		const archive_id = digest(session_id);
 		const indexed_at = new Date().toISOString();
 		return this.#transaction(() => {
-			const known = this.#statement(
-				'SELECT hash,parser_version FROM sessions WHERE archive_id=?',
-			).get(archive_id);
+			const known = this.#statement(sql.session_version).get(
+				archive_id,
+			);
 			const changed =
 				known?.hash !== snapshot.hash ||
 				known?.parser_version !== version;
@@ -297,32 +301,22 @@ export class Archive {
 				recorded_path: path,
 			});
 			if (changed) {
-				this.#statement('DELETE FROM links WHERE archive_id=?').run(
-					archive_id,
-				);
+				this.#statement(sql.delete_links).run(archive_id);
 				if (!snapshot.append) {
-					this.#statement('DELETE FROM parts WHERE archive_id=?').run(
-						archive_id,
-					);
-					this.#statement(
-						'DELETE FROM records WHERE archive_id=?',
-					).run(archive_id);
+					this.#statement(sql.delete_parts).run(archive_id);
+					this.#statement(sql.delete_records).run(archive_id);
 				}
 
 				const stored_keys = snapshot.append
 					? new Set(
-							this.#statement(
-								'SELECT record_key FROM records WHERE archive_id=?',
-							)
+							this.#statement(sql.record_keys)
 								.all(archive_id)
 								.map((row) => String(row.record_key)),
 						)
 					: new Set<string>();
 				for (const record of transcript.records ?? []) {
 					if (stored_keys.has(record.key)) continue;
-					this.#statement(
-						'INSERT INTO records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(archive_id,record_key) DO NOTHING',
-					).run(
+					this.#statement(sql.insert_record).run(
 						archive_id,
 						record.key,
 						record.native_id,
@@ -334,9 +328,7 @@ export class Archive {
 					);
 				}
 				for (const link of transcript.links ?? [])
-					this.#statement(
-						'INSERT OR IGNORE INTO links VALUES(?,?,?,?,?)',
-					).run(
+					this.#statement(sql.insert_link).run(
 						archive_id,
 						link.record_key,
 						link.kind,
@@ -347,13 +339,14 @@ export class Archive {
 					const ids = new Set(
 						all_parts(transcript).map((m) => m.native_id),
 					);
-					for (const row of this.#statement(
-						'SELECT native_id FROM parts WHERE archive_id=?',
-					).all(archive_id))
+					for (const row of this.#statement(sql.part_ids).all(
+						archive_id,
+					))
 						if (!ids.has(String(row.native_id)))
-							this.#statement(
-								'DELETE FROM parts WHERE archive_id=? AND native_id=?',
-							).run(archive_id, row.native_id);
+							this.#statement(sql.delete_part).run(
+								archive_id,
+								row.native_id,
+							);
 				}
 
 				const insert_message = this.#statement(sql.insert_message);
@@ -386,9 +379,7 @@ export class Archive {
 					checked_at: indexed_at,
 				});
 
-				this.#statement(
-					'INSERT INTO session_inputs VALUES(?,?,?,?,?) ON CONFLICT(archive_id,source_id,path) DO UPDATE SET fingerprint=excluded.fingerprint,byte_offset=excluded.byte_offset',
-				).run(
+				this.#statement(sql.store_input).run(
 					archive_id,
 					source.source_id,
 					input.path,
@@ -460,28 +451,24 @@ export class Archive {
 		};
 	}
 
-	/** Shortest archive-ID prefix (12+ characters) unique in this archive. */
-	short_id(archive_id: string) {
-		return this.#short_session_id(archive_id);
-	}
-
 	archive_ids(prefix: string) {
 		return (
-			this.#statement(
-				'SELECT archive_id FROM sessions WHERE substr(archive_id, 1, length(?)) = ? ORDER BY archive_id LIMIT 2',
-			).all(prefix, prefix) as { archive_id: string }[]
+			this.#statement(sql.archive_ids).all(prefix, prefix) as {
+				archive_id: string;
+			}[]
 		).map((row) => row.archive_id);
 	}
 
 	part_ids(archive_id: string) {
 		return (
-			this.#statement(
-				'SELECT native_id FROM parts WHERE archive_id = ?',
-			).all(archive_id) as { native_id: string }[]
+			this.#statement(sql.part_ids).all(archive_id) as {
+				native_id: string;
+			}[]
 		).map((row) => row.native_id);
 	}
 
-	#short_session_id(archive_id: string) {
+	/** Shortest archive-ID prefix (12+ characters) unique in this archive. */
+	short_id(archive_id: string) {
 		// Check the whole archive, not just the displayed page or active filters.
 		for (let length = 12; length < archive_id.length; length++) {
 			const prefix = archive_id.slice(0, length);
@@ -501,12 +488,12 @@ export class Archive {
 			parameters,
 		) as SessionRecord[];
 		return rows.map((row) => {
-			const first = this.#statement(
-				'SELECT record_key FROM records WHERE archive_id=? ORDER BY source_order LIMIT 1',
-			).get(row.archive_id);
+			const first = this.#statement(sql.first_record_key).get(
+				row.archive_id,
+			);
 			return {
 				...row,
-				short_id: this.#short_session_id(row.archive_id),
+				short_id: this.short_id(row.archive_id),
 				first_record_ref: first
 					? record_ref(row.archive_id, String(first.record_key))
 					: null,
@@ -610,7 +597,7 @@ export class Archive {
 				}) as SearchMatch;
 				return {
 					...hit,
-					short_id: this.#short_session_id(hit.archive_id),
+					short_id: this.short_id(hit.archive_id),
 					hits,
 					last_hit,
 				};
@@ -691,13 +678,9 @@ export class Archive {
 		chars: number,
 		direct = false,
 	) {
-		return this.#statement(`SELECT substr(r.raw_json, $offset + 1, $chars) AS content,
-    length(r.raw_json) AS content_length, r.record_key, r.native_type,
-    (SELECT record_key FROM records WHERE archive_id=r.archive_id AND source_order<r.source_order ORDER BY source_order DESC LIMIT 1) AS previous_key,
-    (SELECT record_key FROM records WHERE archive_id=r.archive_id AND source_order>r.source_order ORDER BY source_order LIMIT 1) AS next_key
-    FROM records r WHERE r.archive_id=$archive_id AND r.record_key = ${direct ? '$native_id' : '(SELECT record_key FROM parts WHERE archive_id=$archive_id AND native_id=$native_id)'}`).get(
-			{ archive_id, native_id, offset, chars },
-		) as
+		return this.#statement(
+			direct ? sql.raw_record : sql.raw_record_of_part,
+		).get({ archive_id, native_id, offset, chars }) as
 			| {
 					content: string;
 					content_length: number;
@@ -709,9 +692,10 @@ export class Archive {
 			| undefined;
 	}
 	record_links(archive_id: string, record_key: string) {
-		return this.#statement(
-			'SELECT kind, namespace, target FROM links WHERE archive_id=? AND record_key=? ORDER BY kind,namespace,target LIMIT 21',
-		).all(archive_id, record_key);
+		return this.#statement(sql.record_links).all(
+			archive_id,
+			record_key,
+		);
 	}
 
 	context(

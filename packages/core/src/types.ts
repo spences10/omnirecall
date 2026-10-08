@@ -127,6 +127,14 @@ export function date(value: unknown): string {
 	return new Date(timestamp).toISOString();
 }
 
+/** A lenient reading: anything that is not a valid timestamp is absent. */
+export function iso_timestamp(value: unknown): string | null {
+	return typeof value === 'string' &&
+		Number.isFinite(Date.parse(value))
+		? new Date(value).toISOString()
+		: null;
+}
+
 export function dialogue(
 	value: unknown,
 	omitted_types: readonly string[] = [],

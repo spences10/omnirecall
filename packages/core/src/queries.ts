@@ -73,6 +73,16 @@ const search_rows = (filter = '') => `
 	WHERE ${match_filter} ${filter}
 `;
 
+// An excerpt of one original record, with its neighbours in source order.
+const raw_record = (record_key: string) => `
+	SELECT substr(r.raw_json, $offset + 1, $chars) AS content,
+		length(r.raw_json) AS content_length, r.record_key, r.native_type,
+		(SELECT record_key FROM records WHERE archive_id = r.archive_id AND source_order < r.source_order ORDER BY source_order DESC LIMIT 1) AS previous_key,
+		(SELECT record_key FROM records WHERE archive_id = r.archive_id AND source_order > r.source_order ORDER BY source_order LIMIT 1) AS next_key
+	FROM records r
+	WHERE r.archive_id = $archive_id AND r.record_key = ${record_key}
+`;
+
 export const sql = {
 	get_source: `
 		SELECT source_id, agent, root, status, checked_at
@@ -293,4 +303,63 @@ export const sql = {
 		ORDER BY m.source_order
 		LIMIT 2
 	`,
+	// Positional statements: sync bookkeeping and record storage.
+	cached_unit: `
+		SELECT data FROM sync_cache WHERE source_id=? AND unit_key=? AND signature=?
+	`,
+	session_archive_id: `
+		SELECT archive_id FROM sessions WHERE session_id=? AND source_id=?
+	`,
+	store_cache: `
+		INSERT INTO sync_cache VALUES(?,?,?,?) ON CONFLICT(source_id,unit_key) DO UPDATE SET signature=excluded.signature,data=excluded.data
+	`,
+	checkpoint: `
+		SELECT data FROM sync_cache WHERE source_id=? AND unit_key=?
+	`,
+	record_lines: `
+		SELECT raw_json,source_order FROM records WHERE archive_id=? ORDER BY source_order
+	`,
+	session_version: `
+		SELECT hash,parser_version FROM sessions WHERE archive_id=?
+	`,
+	delete_links: `
+		DELETE FROM links WHERE archive_id=?
+	`,
+	delete_parts: `
+		DELETE FROM parts WHERE archive_id=?
+	`,
+	delete_part: `
+		DELETE FROM parts WHERE archive_id=? AND native_id=?
+	`,
+	delete_records: `
+		DELETE FROM records WHERE archive_id=?
+	`,
+	record_keys: `
+		SELECT record_key FROM records WHERE archive_id=?
+	`,
+	insert_record: `
+		INSERT INTO records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(archive_id,record_key) DO NOTHING
+	`,
+	insert_link: `
+		INSERT OR IGNORE INTO links VALUES(?,?,?,?,?)
+	`,
+	part_ids: `
+		SELECT native_id FROM parts WHERE archive_id=?
+	`,
+	store_input: `
+		INSERT INTO session_inputs VALUES(?,?,?,?,?) ON CONFLICT(archive_id,source_id,path) DO UPDATE SET fingerprint=excluded.fingerprint,byte_offset=excluded.byte_offset
+	`,
+	archive_ids: `
+		SELECT archive_id FROM sessions WHERE substr(archive_id, 1, length(?)) = ? ORDER BY archive_id LIMIT 2
+	`,
+	first_record_key: `
+		SELECT record_key FROM records WHERE archive_id=? ORDER BY source_order LIMIT 1
+	`,
+	record_links: `
+		SELECT kind, namespace, target FROM links WHERE archive_id=? AND record_key=? ORDER BY kind,namespace,target LIMIT 21
+	`,
+	raw_record: raw_record('$native_id'),
+	raw_record_of_part: raw_record(
+		'(SELECT record_key FROM parts WHERE archive_id = $archive_id AND native_id = $native_id)',
+	),
 };

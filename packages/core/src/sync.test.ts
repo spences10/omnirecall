@@ -27,7 +27,11 @@ import {
 	timestamp,
 } from './fixtures.ts';
 import { sync } from './sync.ts';
-import { type Adapter, type Source } from './types.ts';
+import {
+	type Adapter,
+	type JsonlAdapter,
+	type Source,
+} from './types.ts';
 
 let root: string;
 let archive: Archive;
@@ -213,7 +217,7 @@ test('Codex sidecar titles create an immutable metadata revision', async () => {
 
 test('a change between discovery and ingestion is reported without selecting it', async () => {
 	await sync(archive, sources, adapters);
-	const changing: import('./types.ts').JsonlAdapter = {
+	const changing: JsonlAdapter = {
 		...pi_adapter,
 		parse: (records) => {
 			const transcript = pi_adapter.parse(records);

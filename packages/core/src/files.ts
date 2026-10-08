@@ -6,7 +6,9 @@ import {
 	InputError,
 	object,
 	type Agent,
+	type JsonlAdapter,
 	type RecordLine,
+	type ResumeInput,
 	type Source,
 } from './types.ts';
 
@@ -49,7 +51,7 @@ export async function discover_jsonl(
 // Read a bounded snapshot without decoding an unfinished UTF-8 record.
 export async function read_snapshot(
 	path: string,
-	previous?: import('./types.ts').ResumeInput,
+	previous?: ResumeInput,
 ) {
 	const handle = await open(
 		path,
@@ -162,35 +164,34 @@ export async function read_snapshot(
 // Format helpers are optional adapter machinery, not the core import contract.
 export function jsonl_adapter(
 	agent: string,
-	parse: import('./types.ts').JsonlAdapter['parse'],
+	parse: JsonlAdapter['parse'],
 	discover = discover_jsonl,
-): import('./types.ts').JsonlAdapter {
-	const read: import('./types.ts').JsonlAdapter['read'] =
-		async function (
-			this: import('./types.ts').JsonlAdapter,
-			unit,
-			previous,
-		) {
-			if (unit.locators.length !== 1)
-				throw new InputError(
-					'invalid',
-					'JSONL unit requires one input',
-				);
-			const path = unit.locators[0]!;
-			const snapshot = await read_snapshot(path, previous);
-			return {
-				sessions: [this.parse(snapshot.records, path)],
-				append: snapshot.append,
-				inputs: [
-					{
-						path,
-						hash: snapshot.hash,
-						byte_offset: snapshot.byte_offset,
-						partial: snapshot.partial,
-					},
-				],
-			};
+): JsonlAdapter {
+	const read: JsonlAdapter['read'] = async function (
+		this: JsonlAdapter,
+		unit,
+		previous,
+	) {
+		if (unit.locators.length !== 1)
+			throw new InputError(
+				'invalid',
+				'JSONL unit requires one input',
+			);
+		const path = unit.locators[0]!;
+		const snapshot = await read_snapshot(path, previous);
+		return {
+			sessions: [this.parse(snapshot.records, path)],
+			append: snapshot.append,
+			inputs: [
+				{
+					path,
+					hash: snapshot.hash,
+					byte_offset: snapshot.byte_offset,
+					partial: snapshot.partial,
+				},
+			],
 		};
+	};
 	return {
 		agent,
 		parse,
