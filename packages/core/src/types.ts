@@ -32,6 +32,13 @@ export interface Transcript {
 	links?: EvidenceLink[];
 }
 
+/** Dialogue messages followed by the other searchable parts. */
+export function all_parts(
+	transcript: Pick<Transcript, 'messages' | 'parts'>,
+): Message[] {
+	return [...transcript.messages, ...(transcript.parts ?? [])];
+}
+
 export interface Source {
 	source_id: string;
 	agent: Agent;

@@ -8,6 +8,7 @@ import { apply_schema } from './schema.ts';
 import { search_expression } from './search-query.ts';
 import { parse_cache, type SyncCache } from './sync-cache.ts';
 import {
+	all_parts,
 	InputError,
 	type Agent,
 	type Message,
@@ -344,9 +345,7 @@ export class Archive {
 					);
 				if (snapshot.append) {
 					const ids = new Set(
-						[...transcript.messages, ...(transcript.parts ?? [])].map(
-							(m) => m.native_id,
-						),
+						all_parts(transcript).map((m) => m.native_id),
 					);
 					for (const row of this.#statement(
 						'SELECT native_id FROM parts WHERE archive_id=?',
@@ -358,10 +357,7 @@ export class Archive {
 				}
 
 				const insert_message = this.#statement(sql.insert_message);
-				for (const message of [
-					...transcript.messages,
-					...(transcript.parts ?? []),
-				])
+				for (const message of all_parts(transcript))
 					insert_message.run({
 						...message,
 						kind: message.kind ?? 'message',

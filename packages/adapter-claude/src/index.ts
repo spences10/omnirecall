@@ -1,16 +1,59 @@
 import { basename } from 'node:path';
-import { preserve_records } from '../../adapter-shared/src/evidence.ts';
+import {
+	obj,
+	preserve_records,
+	readable,
+	str,
+	tool_call_text,
+	type RecordParts,
+} from '../../adapter-shared/src/evidence.ts';
 import {
 	claude_message_schema,
 	validate_source,
 } from '../../adapter-shared/src/schemas.ts';
 import { jsonl_adapter } from '../../core/src/files.ts';
 import {
+	all_parts,
 	InputError,
 	object,
 	type RecordLine,
 	type Transcript,
 } from '../../core/src/types.ts';
+
+/** Tools, thinking and summaries beside Claude dialogue. */
+function claude_parts({ value: v, add, link }: RecordParts) {
+	link('parent', 'record', v.parentUuid);
+	link('summary_of', 'record', v.leafUuid);
+	const content = obj(v.message).content;
+	if (Array.isArray(content)) {
+		for (const [i, value] of content.entries()) {
+			const b = obj(value),
+				pointer = `/message/content/${i}`;
+			if (b.type === 'thinking')
+				add('reasoning', readable(b), pointer, 'assistant');
+			if (b.type === 'tool_use')
+				add(
+					'tool_call',
+					tool_call_text(b.name, b.input),
+					pointer,
+					'assistant',
+					str(b.id) ?? undefined,
+				);
+			if (b.type === 'tool_result') {
+				add(
+					'tool_result',
+					readable(b.content),
+					pointer,
+					'tool',
+					str(b.tool_use_id) ?? undefined,
+				);
+				link('tool_result_for', 'call', b.tool_use_id);
+			}
+		}
+	}
+	if (v.type === 'summary')
+		add('summary', readable(v.summary), '/summary');
+}
 
 export function parse_claude(
 	records: RecordLine[],
@@ -134,7 +177,12 @@ export function parse_claude(
 		message.parent_id = ancestor;
 		for (const id of visited) nearest.set(id, ancestor);
 	}
-	preserve_records(records, result, 'claude');
+	preserve_records(records, result, {
+		dialogue_pointer: '/message/content',
+		extract: claude_parts,
+	});
+	// Branch state is not established for Claude transcripts.
+	for (const part of all_parts(result)) part.state = 'unknown';
 	if (subagent && result.records?.[0])
 		result.links!.push({
 			record_key: result.records[0].key,

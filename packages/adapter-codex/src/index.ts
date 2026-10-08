@@ -15,6 +15,7 @@ import {
 	read_snapshot,
 } from '../../core/src/files.ts';
 import {
+	all_parts,
 	date,
 	InputError,
 	metadata,
@@ -24,6 +25,7 @@ import {
 	type RecordLine,
 	type Transcript,
 } from '../../core/src/types.ts';
+import { codex_evidence } from './evidence.ts';
 
 export function parse_codex(records: RecordLine[]): Transcript {
 	const header = records[0]?.value;
@@ -287,12 +289,13 @@ export function parse_codex(records: RecordLine[]): Transcript {
 	result.inactive_turns = turns
 		.filter((t) => !t.active)
 		.map((t) => t.id);
-	const preserved = preserve_records(records, result, 'codex');
+	const preserved = preserve_records(
+		records,
+		result,
+		codex_evidence(result.inactive_turns),
+	);
 	if (approval_reviewer) {
-		for (const part of [
-			...preserved.messages,
-			...(preserved.parts ?? []),
-		]) {
+		for (const part of all_parts(preserved)) {
 			if (part.kind === 'message' && part.role === 'user') {
 				part.kind = 'review_context';
 				part.role = 'context';
@@ -307,10 +310,7 @@ export function parse_codex(records: RecordLine[]): Transcript {
 			});
 	}
 	if (unknown_state)
-		for (const message of [
-			...preserved.messages,
-			...(preserved.parts ?? []),
-		]) {
+		for (const message of all_parts(preserved)) {
 			message.state = 'unknown';
 			message.active = true;
 		}

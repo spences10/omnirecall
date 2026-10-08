@@ -1,4 +1,6 @@
+import { tally_unindexed } from '../../adapter-shared/src/evidence.ts';
 import {
+	all_parts,
 	InputError,
 	metadata,
 	object,
@@ -327,16 +329,8 @@ export function parse_opencode(
 		}
 	}
 	if (unknown_state)
-		for (const part of [...result.messages, ...result.parts!])
-			part.state = 'unknown';
-	const indexed = new Set(
-		[...result.messages, ...result.parts!].map(
-			(part) => part.record_key,
-		),
-	);
-	result.unindexed_records = result.records!.filter(
-		(record) => !indexed.has(record.key),
-	).length;
+		for (const part of all_parts(result)) part.state = 'unknown';
+	tally_unindexed(result);
 	return result;
 }
 
