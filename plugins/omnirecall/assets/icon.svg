@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>OmniRecall</title>
+  <rect width="256" height="256" rx="56" fill="#0c1714"/>
+  <path d="M68 88a72 72 0 1 1-10 65" fill="none" stroke="#91efd0" stroke-width="16" stroke-linecap="round"/>
+  <path d="M68 52v40h40" fill="none" stroke="#91efd0" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m105 111 21 17-21 17m39 0h18" fill="none" stroke="#e4efec" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

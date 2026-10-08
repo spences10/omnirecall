@@ -76,7 +76,7 @@ Keep the same archive selection throughout sync and retrieval.
 
 ## Development and release
 
-Plugin version **0.2.0** is independent of the CLI release. The skill
+Plugin version **0.2.1** is independent of the CLI release. The skill
 pins the tested CLI to **0.0.6** for reproducible commands. When
 changing that pin, verify the commands and output fields in the skill
 against the new CLI version, then bump the plugin manifest version
@@ -106,7 +106,7 @@ This repository marketplace supports development and sharing. It does
 not automatically publish or approve a listing in ChatGPT's public
 directory. For submission, package **this directory** as the plugin
 root, including `.codex-plugin/plugin.json`, `skills/`, `README.md`,
-and `LICENSE`. Review the current
+`assets/`, and `LICENSE`. Review the current
 [plugin packaging](https://developers.openai.com/plugins/build/plugins)
 and
 [submission](https://developers.openai.com/plugins/deploy/submission)

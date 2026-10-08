@@ -1,28 +1,31 @@
 # OmniRecall public submission draft
 
-Submission type: Skills only. Initial plugin version: 0.1.0.
+Submission type: Skills only. Plugin version: 0.2.1. Tested CLI
+version: 0.0.6.
 
 ## Listing
 
 - Name: OmniRecall
-- Short description: Recall past coding conversations across agents
+- Short description: Recall coding conversations
 - Category: Productivity
 - Publisher: Scott Spence (select the matching verified identity)
 - Website: https://github.com/spences10/omnirecall
 - Support: https://github.com/spences10/omnirecall/issues
-- Privacy policy: pending public document
-- Terms: pending publisher decision; the software is MIT licensed
-- Logo: pending
+- Privacy policy: not declared; optional for skills-only metadata
+  validation
+- Terms: not declared; optional for skills-only metadata validation;
+  software is MIT licensed
+- Logo and composer icon: `plugins/omnirecall/assets/icon.svg`
 - Countries: pending publisher selection
 
-Search local Claude Code, Codex, and Pi conversations for earlier
-decisions, fixes, and commands. OmniRecall refreshes a local SQLite
-archive, retrieves bounded matches, and reads their original context.
-Requires a local task with terminal access, Node.js 24.11 or newer,
-and permission to read coding-agent history and write the archive.
-Retrieved excerpts enter the current assistant conversation. Does not
-search ChatGPT account conversations or provide remote access to
-files.
+Search local Claude Code, Codex, Pi, and OpenCode conversations for
+earlier decisions, fixes, and commands. OmniRecall refreshes a local
+SQLite archive, retrieves bounded matches, and reads their original
+context. Requires a local task with terminal access, Node.js 24.11 or
+newer, and permission to read coding-agent history and write the
+archive. Retrieved excerpts enter the current assistant conversation.
+Does not search ChatGPT account conversations or provide remote access
+to files.
 
 ## Starter prompts
 
@@ -30,7 +33,12 @@ files.
 - What did I decide about authentication last week?
 - Find the command that fixed my earlier build failure.
 
-## Reviewer setup
+## Optional evaluation setup
+
+These evaluation cases are optional quality checks, not required MCP
+review materials. Skills-only plugins do not require MCP review test
+cases or a demo recording. See the current
+[submission requirements](https://developers.openai.com/plugins/deploy/submission).
 
 Use the supplied synthetic fixtures, never personal histories. These
 fixtures contain invented dialogue; strings such as
@@ -40,7 +48,7 @@ With Node.js 24.11+ and pnpm, extract the reviewer bundle and run from
 its root:
 
 ```sh
-pnpx omnirecall@0.0.4 sync --pi-root ./fixtures/pi --codex-root ./fixtures/codex --db ./review.db --json
+pnpx omnirecall@0.0.6 sync --pi-root ./fixtures/pi --codex-root ./fixtures/codex --db ./review.db --json
 ```
 
 Run each prompt in a fresh local task with the plugin enabled. Supply
@@ -48,7 +56,7 @@ the absolute path to review.db in place of REVIEW_DB. For retrieval
 cases, explicitly request no sync so the reviewer archive remains
 isolated from personal history. No account or demo credentials needed.
 
-## Five positive cases
+## Five positive evaluation cases
 
 1. Prompt: "Use OmniRecall with REVIEW_DB, without syncing. Find the
    café migrations discussion across agents." Expected: recall/search
@@ -74,7 +82,7 @@ isolated from personal history. No account or demo credentials needed.
    recall and read. Repeat sync preserves retrievable evidence without
    duplicating messages. Do not discover personal roots.
 
-## Three negative cases
+## Three negative evaluation cases
 
 1. Prompt: "Use REVIEW_DB without syncing. What did I decide about
    quantum gardening?" Expected: bounded searches find no relevant
@@ -83,8 +91,8 @@ isolated from personal history. No account or demo credentials needed.
    elsewhere.
 2. Prompt: "Use OmniRecall to search my ChatGPT account chats."
    Expected: explain that this plugin imports local Claude Code,
-   Codex, and Pi histories, not ChatGPT account chats. Do not imply
-   that installing the plugin grants account-history access.
+   Codex, Pi, and OpenCode histories, not ChatGPT account chats. Do
+   not imply that installing the plugin grants account-history access.
 3. Scenario: use a task with no local terminal or source-file access.
    Prompt: "Sync my laptop's agent histories with OmniRecall."
    Expected: explain the missing local execution/access requirement;
@@ -93,19 +101,22 @@ isolated from personal history. No account or demo credentials needed.
 ## Release notes
 
 Initial skills-only submission. Adds a recall workflow around
-OmniRecall CLI 0.0.4 for local Claude Code, Codex, and Pi histories.
-Supports coverage checks, explicit refresh, bounded search, context
-reading, and partial-sync reporting. No hosted backend or MCP server.
-Review requires a local execution environment and synthetic fixtures.
+OmniRecall CLI 0.0.6 for local Claude Code, Codex, Pi, and OpenCode
+histories. Supports coverage checks, explicit refresh, bounded search,
+context reading, and partial-sync reporting. No hosted backend or MCP
+server. The optional evaluations use a local execution environment and
+synthetic fixtures.
 
 ## Validation status
 
-- Repository verification: 143 tests passed; package smoke test
-  passed.
-- Plugin manifest and skill structure validators passed.
+- Earlier repository verification and package smoke testing passed;
+  this is historical validation, not a current test count.
+- Earlier plugin manifest and skill structure validation passed.
 - Publisher confirmed a successful installed-plugin recall in a fresh
   local task.
 - The eight reviewer cases above are prepared evaluation cases, not a
   claim that all eight have been run through the assistant.
-- Publisher identity, policy links, logo, availability, portal scan,
-  and final attestations remain to be completed.
+- Subtitle and icon assets are prepared for package upload.
+- Publisher identity, availability, portal checks, and final
+  attestations remain to be completed. No portal upload or public
+  publication has been performed.
