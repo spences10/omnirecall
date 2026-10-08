@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { Archive } from './database.ts';
 import { source_config } from './files.ts';
-import { type Source, type Transcript } from './types.ts';
+import type { Source, Transcript } from './types.ts';
 
 const options = { limit: 10, offset: 0, context: 0 };
 const source = source_config('pi', '/synthetic/pi');

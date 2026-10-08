@@ -11,6 +11,7 @@ import {
 	codex_title_schema,
 	validate_source,
 } from '../../adapter-shared/src/schemas.ts';
+import { InputError } from '../../core/src/errors.ts';
 import {
 	discover_jsonl,
 	jsonl_adapter,
@@ -19,13 +20,14 @@ import {
 import {
 	all_parts,
 	date,
-	InputError,
 	metadata,
 	object,
 	text,
-	type JsonObject,
-	type RecordLine,
-	type Transcript,
+} from '../../core/src/readers.ts';
+import type {
+	JsonObject,
+	RecordLine,
+	Transcript,
 } from '../../core/src/types.ts';
 import { codex_evidence } from './evidence.ts';
 import { codex_thread } from './thread.ts';

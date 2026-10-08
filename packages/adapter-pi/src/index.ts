@@ -12,17 +12,19 @@ import {
 	pi_message_schema,
 	validate_source,
 } from '../../adapter-shared/src/schemas.ts';
+import { InputError } from '../../core/src/errors.ts';
 import { jsonl_adapter } from '../../core/src/files.ts';
 import {
 	date,
 	dialogue,
-	InputError,
 	metadata,
 	object,
 	text,
-	type Message,
-	type RecordLine,
-	type Transcript,
+} from '../../core/src/readers.ts';
+import type {
+	Message,
+	RecordLine,
+	Transcript,
 } from '../../core/src/types.ts';
 
 /** Tools, thinking, summaries and shell runs beside Pi dialogue. */

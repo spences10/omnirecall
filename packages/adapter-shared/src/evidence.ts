@@ -1,10 +1,9 @@
-import {
-	all_parts,
-	iso_timestamp,
-	type JsonObject,
-	type Message,
-	type RecordLine,
-	type Transcript,
+import { all_parts, iso_timestamp } from '../../core/src/readers.ts';
+import type {
+	JsonObject,
+	Message,
+	RecordLine,
+	Transcript,
 } from '../../core/src/types.ts';
 
 // Lenient readers: evidence is kept even where dialogue parsing is strict.

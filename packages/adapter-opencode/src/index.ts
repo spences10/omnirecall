@@ -13,12 +13,12 @@ import {
 	validate_row,
 	type Schema,
 } from '../../adapter-shared/src/schemas.ts';
-import {
-	all_parts,
-	InputError,
-	type Adapter,
-	type Message,
-	type Transcript,
+import { InputError } from '../../core/src/errors.ts';
+import { all_parts } from '../../core/src/readers.ts';
+import type {
+	Adapter,
+	Message,
+	Transcript,
 } from '../../core/src/types.ts';
 import { validate } from '../../core/src/validation.ts';
 import { discover, snapshot, type Snapshot } from './storage.ts';

@@ -1,15 +1,13 @@
 import { excerpt_chars } from '../../../packages/core/src/compact.ts';
 import type { QueryOptions } from '../../../packages/core/src/database.ts';
+import { InputError } from '../../../packages/core/src/errors.ts';
 import { source_config } from '../../../packages/core/src/files.ts';
 import {
 	is_short_ref,
 	parse_ref,
 } from '../../../packages/core/src/refs.ts';
-import {
-	InputError,
-	type Source,
-} from '../../../packages/core/src/types.ts';
-import { agents } from './agents.ts';
+import type { Source } from '../../../packages/core/src/types.ts';
+import { agent_list, agents } from './agents.ts';
 
 export type Args = Record<string, unknown>;
 
@@ -120,7 +118,7 @@ export function parse_request(
 		agent !== undefined &&
 		!agents.some((known) => known.agent === agent)
 	)
-		reject('--agent must be pi, codex, claude, or opencode');
+		reject(`--agent must be ${agent_list}`);
 	if (args.raw && name !== 'read')
 		reject('--raw applies to read only');
 	if (args.raw && args.context !== undefined)

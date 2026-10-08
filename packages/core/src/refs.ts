@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Archive } from './database.ts';
-import { InputError } from './types.ts';
+import { InputError } from './errors.ts';
 
 const canonical_pattern =
 	/^([mr])1\.([a-f0-9]{64})\.([A-Za-z0-9_-]+)$/;

@@ -1,10 +1,4 @@
-import {
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	symlinkSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from 'vitest';
@@ -13,6 +7,7 @@ import { source_config } from '../../core/src/files.ts';
 import { focused_read, raw_read } from '../../core/src/read.ts';
 import { message_ref } from '../../core/src/refs.ts';
 import { sync } from '../../core/src/sync.ts';
+import { temp_dir } from '../../core/src/test-support.ts';
 import {
 	create_fixture,
 	created,
@@ -195,7 +190,7 @@ test('streaming tool updates and error results retain distinct call/result evide
 });
 
 test('live WAL snapshots catch growth, same-sequence updates, deletion and malformed rows without modifying sources', async () => {
-	const root = mkdtempSync(join(tmpdir(), 'omni-opencode-'));
+	const root = temp_dir('omni-opencode-');
 	const path = join(root, 'opencode.db');
 	let writer: DatabaseSync | undefined = create_fixture(path);
 	const archive = new Archive(':memory:');
@@ -303,14 +298,11 @@ test('live WAL snapshots catch growth, same-sequence updates, deletion and malfo
 	} finally {
 		writer?.close();
 		archive.close();
-		rmSync(root, { recursive: true, force: true });
 	}
 });
 
 test('uncommitted writes stay invisible and a concurrent committed change retains the last good import', async () => {
-	const root = mkdtempSync(
-		join(tmpdir(), 'omni-opencode-concurrent-'),
-	);
+	const root = temp_dir('omni-opencode-concurrent-');
 	const writer = create_fixture(join(root, 'opencode.db'));
 	const archive = new Archive(':memory:');
 	const source = source_config('opencode', root);
@@ -381,12 +373,11 @@ test('uncommitted writes stay invisible and a concurrent committed change retain
 	} finally {
 		writer.close();
 		archive.close();
-		rmSync(root, { recursive: true, force: true });
 	}
 });
 
 test('a session emptied in place removes searchable parts but retains session metadata', async () => {
-	const root = mkdtempSync(join(tmpdir(), 'omni-opencode-empty-'));
+	const root = temp_dir('omni-opencode-empty-');
 	const writer = create_fixture(join(root, 'opencode.db'));
 	const archive = new Archive(':memory:');
 	const source = source_config('opencode', root);
@@ -402,30 +393,25 @@ test('a session emptied in place removes searchable parts but retains session me
 	} finally {
 		writer.close();
 		archive.close();
-		rmSync(root, { recursive: true, force: true });
 	}
 });
 
 test('legacy layouts and symlink databases are explicitly unsupported', async () => {
-	const root = mkdtempSync(join(tmpdir(), 'omni-opencode-legacy-'));
+	const root = temp_dir('omni-opencode-legacy-');
 	const path = join(root, 'opencode.db');
-	try {
-		const legacy = new DatabaseSync(path);
-		legacy.exec(
-			'CREATE TABLE session(id TEXT); CREATE TABLE message(id TEXT)',
-		);
-		legacy.close();
-		await expect(opencode_adapter.discover(root)).rejects.toThrow(
-			'legacy layouts are unsupported',
-		);
-		rmSync(path);
-		const target = join(root, 'target.db');
-		create_fixture(target).close();
-		symlinkSync(target, path);
-		await expect(opencode_adapter.discover(root)).rejects.toThrow(
-			'not a symlink',
-		);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	const legacy = new DatabaseSync(path);
+	legacy.exec(
+		'CREATE TABLE session(id TEXT); CREATE TABLE message(id TEXT)',
+	);
+	legacy.close();
+	await expect(opencode_adapter.discover(root)).rejects.toThrow(
+		'legacy layouts are unsupported',
+	);
+	rmSync(path);
+	const target = join(root, 'target.db');
+	create_fixture(target).close();
+	symlinkSync(target, path);
+	await expect(opencode_adapter.discover(root)).rejects.toThrow(
+		'not a symlink',
+	);
 });

@@ -1,3 +1,5 @@
+import { agent_list, agents } from './agents.ts';
+
 const descriptions: Record<string, string> = {
 	sources:
 		'Inspect archive coverage and last sync times; retrieval never syncs automatically',
@@ -15,26 +17,17 @@ const descriptions: Record<string, string> = {
 	read: 'Read one message by ref; --context adds neighbours, --full adds provenance; follow next_char_offset',
 };
 
+const root_flags = agents.map(({ root_flag }) => root_flag);
+const root_args = Object.fromEntries(
+	agents.map(({ root_flag, root_help }) => [
+		root_flag,
+		{ type: 'string', description: root_help },
+	]),
+) as Record<string, { type: 'string'; description: string }>;
+
 const command_options: Record<string, string[]> = {
-	sources: [
-		'pi-root',
-		'claude-root',
-		'codex-root',
-		'opencode-root',
-		'agent',
-		'source',
-		'limit',
-		'offset',
-	],
-	sync: [
-		'pi-root',
-		'claude-root',
-		'codex-root',
-		'opencode-root',
-		'agent',
-		'source',
-		'verbose',
-	],
+	sources: [...root_flags, 'agent', 'source', 'limit', 'offset'],
+	sync: [...root_flags, 'agent', 'source', 'verbose'],
 	search: [
 		'query',
 		'agent',
@@ -139,14 +132,7 @@ function all_args(name: string) {
 			description:
 				'Archive path; use the same --db for sync and retrieval',
 		},
-		'pi-root': {
-			type: 'string',
-			description: 'Explicit Pi session tree root',
-		},
-		'claude-root': {
-			type: 'string',
-			description: 'Explicit Claude transcript tree root',
-		},
+		...root_args,
 		raw: {
 			type: 'boolean',
 			description:
@@ -157,19 +143,9 @@ function all_args(name: string) {
 			description:
 				'Evidence kind: message (default), all, reasoning, tool_call, tool_result, summary, operation, context, review_context',
 		},
-		'codex-root': {
-			type: 'string',
-			description: 'Explicit Codex JSONL tree root',
-		},
-		'opencode-root': {
-			type: 'string',
-			description:
-				'OpenCode data directory containing a v2 opencode.db',
-		},
 		agent: {
 			type: 'string',
-			description:
-				'Authoring agent: pi, codex, claude, or opencode (not the caller)',
+			description: `Authoring agent: ${agent_list} (not the caller)`,
 		},
 		source: {
 			type: 'string',

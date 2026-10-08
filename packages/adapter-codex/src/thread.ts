@@ -1,10 +1,7 @@
 import { codex_dialogue } from '../../adapter-shared/src/schemas.ts';
-import {
-	InputError,
-	text,
-	type JsonObject,
-	type Message,
-} from '../../core/src/types.ts';
+import { InputError } from '../../core/src/errors.ts';
+import { text } from '../../core/src/readers.ts';
+import type { JsonObject, Message } from '../../core/src/types.ts';
 
 /** Turns and dialogue of one Codex thread, built by replaying its events. */
 export function codex_thread(thread_id: string) {

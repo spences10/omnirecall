@@ -1,5 +1,6 @@
 import * as v from 'valibot';
-import { InputError, type ImportResult } from './types.ts';
+import { InputError } from './errors.ts';
+import type { ImportResult } from './types.ts';
 
 export const identity_schema = v.pipe(
 	v.string(),

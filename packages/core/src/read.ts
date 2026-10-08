@@ -4,8 +4,8 @@ import {
 	summary_row,
 } from './compact.ts';
 import type { Archive } from './database.ts';
+import { InputError } from './errors.ts';
 import { message_ref, record_ref, resolve_ref } from './refs.ts';
-import { InputError } from './types.ts';
 
 const max_links = 20;
 

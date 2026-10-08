@@ -1,9 +1,7 @@
 import * as v from 'valibot';
-import {
-	InputError,
-	object,
-	type JsonObject,
-} from '../../core/src/types.ts';
+import { InputError } from '../../core/src/errors.ts';
+import { object } from '../../core/src/readers.ts';
+import type { JsonObject } from '../../core/src/types.ts';
 import {
 	count_schema,
 	identity_schema,

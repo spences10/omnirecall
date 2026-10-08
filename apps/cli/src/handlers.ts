@@ -8,6 +8,7 @@ import {
 	compact_sessions,
 } from '../../../packages/core/src/compact.ts';
 import type { Archive } from '../../../packages/core/src/database.ts';
+import { InputError } from '../../../packages/core/src/errors.ts';
 import {
 	focused_read,
 	raw_read,
@@ -19,10 +20,7 @@ import {
 	sync,
 	type SyncProgress,
 } from '../../../packages/core/src/sync.ts';
-import {
-	InputError,
-	type Source,
-} from '../../../packages/core/src/types.ts';
+import type { Source } from '../../../packages/core/src/types.ts';
 import { agents } from './agents.ts';
 import type { Args, Request } from './request.ts';
 import { automatic_sources } from './sources.ts';

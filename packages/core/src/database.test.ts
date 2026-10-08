@@ -1,11 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test, vi } from 'vitest';
 import { Archive } from './database.ts';
 import { sql } from './queries.ts';
-import { type Source, type Transcript } from './types.ts';
+import { temp_dir } from './test-support.ts';
+import type { Source, Transcript } from './types.ts';
 
 const source: Source = {
 	source_id: 'pi:test',
@@ -40,20 +40,16 @@ const snapshot = {
 const options = { limit: 10, offset: 0, context: 2 };
 
 test('refuses a foreign database without changing it', () => {
-	const root = mkdtempSync(join(tmpdir(), 'omnirecall-ownership-'));
-	try {
-		const path = join(root, 'foreign.sqlite');
-		const foreign = new DatabaseSync(path);
-		foreign.exec('CREATE TABLE keep_me(value TEXT);');
-		foreign.close();
-		const original = readFileSync(path);
-		expect(() => new Archive(path)).toThrow(
-			'Not an Omni Recall archive',
-		);
-		expect(readFileSync(path)).toEqual(original);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	const root = temp_dir('omnirecall-ownership-');
+	const path = join(root, 'foreign.sqlite');
+	const foreign = new DatabaseSync(path);
+	foreign.exec('CREATE TABLE keep_me(value TEXT);');
+	foreign.close();
+	const original = readFileSync(path);
+	expect(() => new Archive(path)).toThrow(
+		'Not an Omni Recall archive',
+	);
+	expect(readFileSync(path)).toEqual(original);
 });
 
 test('provenance path and status come from the same most recent candidate', () => {
@@ -156,35 +152,28 @@ test('source lookup, coverage and path reconciliation preserve archived sessions
 });
 
 test('opens the current schema read-only without modifying the database', () => {
-	const root = mkdtempSync(join(tmpdir(), 'omnirecall-schema-'));
+	const root = temp_dir('omnirecall-schema-');
 	const path = join(root, 'omnirecall.db');
+	const existing = new DatabaseSync(path);
 	try {
-		const existing = new DatabaseSync(path);
-		try {
-			existing.exec(
-				readFileSync(
-					new URL('./schema.sql', import.meta.url),
-					'utf8',
-				),
-			);
-			existing.exec(
-				'PRAGMA application_id=0x4f4d4e49; PRAGMA user_version=1;',
-			);
-		} finally {
-			existing.close();
-		}
-		const original = readFileSync(path);
-		const archive = new Archive(path, true);
-		try {
-			expect(archive.coverage().indexed_sessions).toBe(0);
-			expect(archive.sessions(options)).toEqual([]);
-		} finally {
-			archive.close();
-		}
-		expect(readFileSync(path)).toEqual(original);
+		existing.exec(
+			readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'),
+		);
+		existing.exec(
+			'PRAGMA application_id=0x4f4d4e49; PRAGMA user_version=1;',
+		);
 	} finally {
-		rmSync(root, { recursive: true, force: true });
+		existing.close();
 	}
+	const original = readFileSync(path);
+	const archive = new Archive(path, true);
+	try {
+		expect(archive.coverage().indexed_sessions).toBe(0);
+		expect(archive.sessions(options)).toEqual([]);
+	} finally {
+		archive.close();
+	}
+	expect(readFileSync(path)).toEqual(original);
 });
 
 test('search provenance uses indexed session inputs instead of scanning all resources', () => {
@@ -227,7 +216,7 @@ test('search provenance uses indexed session inputs instead of scanning all reso
 });
 
 test('provenance prefers available inputs and excludes unrelated resources', () => {
-	const root = mkdtempSync(join(tmpdir(), 'omnirecall-provenance-'));
+	const root = temp_dir('omnirecall-provenance-');
 	const path = join(root, 'archive.sqlite');
 	const archive = new Archive(path);
 	try {
@@ -257,7 +246,6 @@ test('provenance prefers available inputs and excludes unrelated resources', () 
 		}
 	} finally {
 		archive.close();
-		rmSync(root, { recursive: true, force: true });
 	}
 });
 

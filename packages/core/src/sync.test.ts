@@ -27,11 +27,7 @@ import {
 	timestamp,
 } from './fixtures.ts';
 import { sync } from './sync.ts';
-import {
-	type Adapter,
-	type JsonlAdapter,
-	type Source,
-} from './types.ts';
+import type { Adapter, JsonlAdapter, Source } from './types.ts';
 
 let root: string;
 let archive: Archive;

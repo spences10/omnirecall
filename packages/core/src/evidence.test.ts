@@ -1,10 +1,4 @@
-import {
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from 'vitest';
@@ -26,20 +20,20 @@ import {
 import { focused_read, raw_read } from './read.ts';
 import { message_ref } from './refs.ts';
 import { sync } from './sync.ts';
+import { temp_dir } from './test-support.ts';
 import type { Adapter } from './types.ts';
 const options = { limit: 100, offset: 0, context: 1 };
 
 async function fixture(
 	run: (root: string, archive: Archive, db: string) => Promise<void>,
 ) {
-	const root = mkdtempSync(join(tmpdir(), 'omni-evidence-')),
+	const root = temp_dir('omni-evidence-'),
 		db = join(root, 'archive.db');
 	const archive = new Archive(db);
 	try {
 		await run(root, archive, db);
 	} finally {
 		archive.close();
-		rmSync(root, { recursive: true, force: true });
 	}
 }
 

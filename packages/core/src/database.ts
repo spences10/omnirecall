@@ -1,21 +1,21 @@
 import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { InputError } from './errors.ts';
 import { digest, parser_version } from './files.ts';
 import { sql } from './queries.ts';
+import { all_parts } from './readers.ts';
 import { record_ref } from './refs.ts';
 import { apply_schema } from './schema.ts';
 import { search_expression } from './search-query.ts';
 import { parse_cache, type SyncCache } from './sync-cache.ts';
-import {
-	all_parts,
-	InputError,
-	type Agent,
-	type ImportInput,
-	type Message,
-	type RecordLine,
-	type Source,
-	type Transcript,
+import type {
+	Agent,
+	ImportInput,
+	Message,
+	RecordLine,
+	Source,
+	Transcript,
 } from './types.ts';
 
 type SourceFilter = { agent?: Agent; source?: string };

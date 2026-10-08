@@ -2,14 +2,14 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import {
-	InputError,
-	object,
-	type Agent,
-	type JsonlAdapter,
-	type RecordLine,
-	type ResumeInput,
-	type Source,
+import { InputError } from './errors.ts';
+import { object } from './readers.ts';
+import type {
+	Agent,
+	JsonlAdapter,
+	RecordLine,
+	ResumeInput,
+	Source,
 } from './types.ts';
 
 export const max_file_bytes = 64 * 1024 * 1024;

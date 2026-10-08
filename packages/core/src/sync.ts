@@ -1,13 +1,13 @@
 import { Archive } from './database.ts';
+import { InputError } from './errors.ts';
 import { digest } from './files.ts';
 import { type SyncCache } from './sync-cache.ts';
-import {
-	InputError,
-	type Adapter,
-	type ImportInput,
-	type ImportResult,
-	type ImportUnit,
-	type Source,
+import type {
+	Adapter,
+	ImportInput,
+	ImportResult,
+	ImportUnit,
+	Source,
 } from './types.ts';
 import {
 	import_schema,

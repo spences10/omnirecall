@@ -11,15 +11,14 @@ import {
 	claude_message_schema,
 	validate_source,
 } from '../../adapter-shared/src/schemas.ts';
+import { InputError } from '../../core/src/errors.ts';
 import { jsonl_adapter } from '../../core/src/files.ts';
 import {
 	all_parts,
-	InputError,
 	iso_timestamp,
 	object,
-	type RecordLine,
-	type Transcript,
-} from '../../core/src/types.ts';
+} from '../../core/src/readers.ts';
+import type { RecordLine, Transcript } from '../../core/src/types.ts';
 
 /** Tools, thinking and summaries beside Claude dialogue. */
 function claude_parts({ value: v, add, link }: RecordParts) {
