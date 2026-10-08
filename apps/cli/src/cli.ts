@@ -17,8 +17,10 @@ import {
 	compact_sessions,
 	excerpt_chars,
 	focused_read,
+	is_short_ref,
 	parse_ref,
 	raw_read,
+	short_refs,
 } from '../../../packages/core/src/retrieval.ts';
 import { error_code, sync } from '../../../packages/core/src/sync.ts';
 import {
@@ -518,7 +520,8 @@ function command(name: string) {
 						'sync operates on whole source roots, not project/session/history filters',
 					);
 				const query = optional(args.query)?.trim();
-				if (name === 'read') parse_ref(query ?? '');
+				if (name === 'read' && !is_short_ref(query ?? ''))
+					parse_ref(query ?? '');
 				if (
 					(name === 'search' || name === 'recall') &&
 					(!query || query.length > 1000)
@@ -590,7 +593,7 @@ function command(name: string) {
 					result = {
 						status: 'ok',
 						format: 'compact',
-						...(args.raw || query!.startsWith('r1.')
+						...(args.raw || query!.startsWith('r')
 							? raw_read(archive, query!, char_offset, chars)
 							: focused_read(
 									archive,
@@ -684,7 +687,12 @@ function command(name: string) {
 					return;
 				}
 				const output = bounded_json(
-					{ schema_version, ...result },
+					{
+						schema_version,
+						...(compact && archive
+							? short_refs(archive, result)
+							: result),
+					},
 					max_bytes,
 				);
 				console.log(

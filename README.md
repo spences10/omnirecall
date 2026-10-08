@@ -104,7 +104,8 @@ smaller session listings. These use JSON schema v3: identical metadata
 lives in optional `shared.results` / `shared.messages` objects, with
 per-row values taking precedence. Source paths are included, and
 recall avoids repeating content in snippets unless the message excerpt
-omits the hit. Full `ref` values remain directly usable by `read`.
+omits the hit. Compact output prints short `m2`/`r2` refs; pass them
+to `read` unchanged. Canonical `m1`/`r1` refs still work.
 
 Detailed search and recall (`--full`) and ordinary sessions stay on
 schema v1; `read` stays on schema v2. See

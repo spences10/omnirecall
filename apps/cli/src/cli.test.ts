@@ -741,6 +741,33 @@ test('compact search, focused reading, and compact recall form a bounded retriev
 			'migrationneedle',
 		);
 		expect(readFileSync(db)).toEqual(original);
+		// Compact output carries short refs; canonical refs keep working.
+		expect(hit.ref).toMatch(/^m2\.[a-f0-9]{12}\.[A-Za-z0-9_-]{11}$/);
+		const detailed = JSON.parse(full.stdout).results[0];
+		const canonical = `m1.${detailed.archive_id}.${Buffer.from(detailed.native_id).toString('base64url')}`;
+		const focused = JSON.parse(read.stdout).results[0];
+		expect(
+			JSON.parse(run(['read', canonical, '--context', '0']).stdout)
+				.results[0].ref,
+		).toBe(hit.ref);
+		expect(focused.record_ref).toMatch(/^r2\.[a-f0-9]{12}\./);
+		const raw = run(['read', focused.record_ref]);
+		expect(raw.status, raw.stdout).toBe(0);
+		expect(JSON.parse(raw.stdout).results[0].content).toContain(
+			'"id":"long"',
+		);
+		const listed = JSON.parse(run(['sessions', '--compact']).stdout)
+			.results[0];
+		expect(listed.first_record_ref).toMatch(/^r2\./);
+		expect(run(['read', listed.first_record_ref]).status).toBe(0);
+		for (const missing of [
+			hit.ref.replace(/.$/, (c: string) => (c === 'A' ? 'B' : 'A')),
+			`m2.${'0'.repeat(12)}.${hit.ref.split('.')[2]}`,
+		]) {
+			const absent = run(['read', missing]);
+			expect(absent.status, absent.stdout).toBe(1);
+			expect(JSON.parse(absent.stdout).code).toBe('not_found');
+		}
 		const first = JSON.parse(
 			run(['read', hit.ref, '--context', '0', '--chars', '20'])
 				.stdout,

@@ -458,6 +458,27 @@ export class Archive {
 		};
 	}
 
+	/** Shortest archive-ID prefix (12+ characters) unique in this archive. */
+	short_id(archive_id: string) {
+		return this.#short_session_id(archive_id);
+	}
+
+	archive_ids(prefix: string) {
+		return (
+			this.#statement(
+				'SELECT archive_id FROM sessions WHERE substr(archive_id, 1, length(?)) = ? ORDER BY archive_id LIMIT 2',
+			).all(prefix, prefix) as { archive_id: string }[]
+		).map((row) => row.archive_id);
+	}
+
+	part_ids(archive_id: string) {
+		return (
+			this.#statement(
+				'SELECT native_id FROM parts WHERE archive_id = ?',
+			).all(archive_id) as { native_id: string }[]
+		).map((row) => row.native_id);
+	}
+
 	#short_session_id(archive_id: string) {
 		// Check the whole archive, not just the displayed page or active filters.
 		for (let length = 12; length < archive_id.length; length++) {

@@ -117,8 +117,16 @@ Default search, default recall, and `sessions --compact` use
 `schema_version: 3`. This replaces the previous compact search/recall
 schema v2; consumers must check the version. Detailed search and
 recall (`--full`) and ordinary sessions remain schema v1. Focused and
-raw `read` responses remain schema v2. References keep their existing
-exact `m1`/`r1` format and can be passed directly to `read`.
+raw `read` responses remain schema v2. Canonical `m1`/`r1` references
+remain valid input to `read`.
+
+Compact output prints short references: `m2.<short_id>.<digest>` for
+messages and `r2.<short_id>.<record key>` for records. The digest is a
+truncated SHA-256 of the message's native ID, resolved within the
+session at read time. Short references share `short_id` semantics: a
+later import may make one ambiguous, which fails with an explicit
+error instead of selecting a message. Repeat the search for a current
+reference.
 
 Metadata identical across at least two returned rows is stored once in
 optional `shared.results` or `shared.messages` objects. A missing
